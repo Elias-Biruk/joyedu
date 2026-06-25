@@ -70,7 +70,7 @@ function TeacherApplicationContent() {
               <div>
                 <CardTitle className="text-yellow-700 dark:text-yellow-400">Application Pending</CardTitle>
                 <CardDescription>
-                  Your teacher application is being reviewed by our team. We'll notify you once a decision is made.
+                  Your teacher application is being reviewed by our team. We&apos;ll notify you once a decision is made.
                 </CardDescription>
               </div>
             </div>
@@ -159,7 +159,7 @@ function TeacherApplicationContent() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              Design and publish courses on topics you're passionate about
+              Design and publish courses on topics you&apos;re passionate about
             </p>
           </CardContent>
         </Card>

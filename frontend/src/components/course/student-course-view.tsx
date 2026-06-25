@@ -238,7 +238,7 @@ export function StudentCourseView({ courseId, accessToken }: StudentCourseViewPr
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <h3 className="font-semibold mb-2">What You'll Learn</h3>
+                <h3 className="font-semibold mb-2">What You&apos;ll Learn</h3>
                 <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
                   {course.learningGoals?.map((goal, index) => (
                     <li key={index}>{goal}</li>

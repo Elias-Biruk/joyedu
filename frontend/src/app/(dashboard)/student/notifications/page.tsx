@@ -62,7 +62,7 @@ export default function StudentNotifications() {
               <Bell className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <h3 className="font-medium mb-2">No notifications</h3>
               <p className="text-sm text-muted-foreground">
-                You're all caught up! Notifications will appear here
+                You&apos;re all caught up! Notifications will appear here
               </p>
             </CardContent>
           </Card>

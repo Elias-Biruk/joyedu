@@ -271,7 +271,7 @@ export function CoursePreview({ courseId, accessToken, onEdit, onClose }: Course
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Star className="h-5 w-5" />
-                What You'll Learn
+                What You&apos;ll Learn
               </CardTitle>
             </CardHeader>
             <CardContent>

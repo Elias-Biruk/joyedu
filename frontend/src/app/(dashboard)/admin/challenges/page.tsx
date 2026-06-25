@@ -330,7 +330,7 @@ export default function AdminChallenges() {
             <Code className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
             <h3 className="text-xl font-semibold mb-2">No challenges yet</h3>
             <p className="text-muted-foreground">
-              Create coding challenges to test students' skills
+              Create coding challenges to test students&apos; skills
             </p>
           </CardContent>
         </Card>
