@@ -1,8 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../common/prisma.service';
-import { UpdateProfileDto } from './dto/users.dto';
-import { PaginationDto, PaginatedResult } from '../common/dto/pagination.dto';
-import type { User } from '@prisma/client';
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { PrismaService } from "../common/prisma.service";
+import { UpdateProfileDto } from "./dto/users.dto";
+import { PaginationDto } from "../common/dto/pagination.dto";
+import { paginate, getPaginationMeta } from "../common/utils/pagination.util";
+import { textSearch } from "../common/utils/entity.util";
+import type { User } from "@prisma/client";
 
 @Injectable()
 export class UsersService {
@@ -13,7 +15,7 @@ export class UsersService {
       where: { id },
       include: { profile: true },
     });
-    if (!user || user.deletedAt) throw new NotFoundException('User not found');
+    if (!user || user.deletedAt) throw new NotFoundException("User not found");
     return this.sanitize(user);
   }
 
@@ -51,7 +53,7 @@ export class UsersService {
       include: {
         profile: true,
         taughtCourses: {
-          where: { status: 'PUBLISHED', deletedAt: null },
+          where: { status: "PUBLISHED", deletedAt: null },
           select: {
             id: true,
             title: true,
@@ -63,7 +65,7 @@ export class UsersService {
         },
       },
     });
-    if (!user || user.deletedAt) throw new NotFoundException('User not found');
+    if (!user || user.deletedAt) throw new NotFoundException("User not found");
     return {
       id: user.id,
       username: user.username,
@@ -77,44 +79,40 @@ export class UsersService {
   }
 
   async listUsers(query: PaginationDto) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
-    const skip = (page - 1) * limit;
+    const { skip, take } = getPaginationMeta(query);
 
     const where: Record<string, unknown> = { deletedAt: null };
     if (query.search) {
-      where.OR = [
-        { firstName: { contains: query.search, mode: 'insensitive' } },
-        { lastName: { contains: query.search, mode: 'insensitive' } },
-        { email: { contains: query.search, mode: 'insensitive' } },
-        { username: { contains: query.search, mode: 'insensitive' } },
-      ];
+      where.OR = textSearch(
+        ["firstName", "lastName", "email", "username"],
+        query.search,
+      );
     }
 
-    const [users, total] = await Promise.all([
-      this.prisma.user.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: query.sortOrder || 'desc' },
-        select: {
-          id: true,
-          email: true,
-          username: true,
-          firstName: true,
-          lastName: true,
-          avatar: true,
-          roles: true,
-          activeRole: true,
-          isEmailVerified: true,
-          isActive: true,
-          createdAt: true,
-        },
-      }),
-      this.prisma.user.count({ where }),
-    ]);
-
-    return new PaginatedResult(users, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.user.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { createdAt: query.sortOrder || "desc" },
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+            avatar: true,
+            roles: true,
+            activeRole: true,
+            isEmailVerified: true,
+            isActive: true,
+            createdAt: true,
+          },
+        }),
+      () => this.prisma.user.count({ where }),
+      query,
+    );
   }
 
   private sanitize(user: User & { profile?: unknown }) {

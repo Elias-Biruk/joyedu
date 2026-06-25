@@ -1,10 +1,16 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../common/prisma.service';
-import { CreateChallengeDto, SubmitCodeDto, RunCodeDto } from './dto/coding.dto';
-import { generateSlug } from '../common/utils/slug.util';
-import { PaginationDto, PaginatedResult } from '../common/dto/pagination.dto';
-import * as vm from 'vm';
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { PrismaService } from "../common/prisma.service";
+import {
+  CreateChallengeDto,
+  SubmitCodeDto,
+  RunCodeDto,
+} from "./dto/coding.dto";
+import { generateSlug } from "../common/utils/slug.util";
+import { PaginationDto } from "../common/dto/pagination.dto";
+import { paginate, getPaginationMeta } from "../common/utils/pagination.util";
+import { textSearch } from "../common/utils/entity.util";
+import * as vm from "vm";
 
 @Injectable()
 export class CodingService {
@@ -22,48 +28,45 @@ export class CodingService {
     });
   }
 
-  async findAll(query: PaginationDto & { difficulty?: string; language?: string }) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
-    const skip = (page - 1) * limit;
+  async findAll(
+    query: PaginationDto & { difficulty?: string; language?: string },
+  ) {
+    const { skip, take } = getPaginationMeta(query);
 
     const where: Record<string, unknown> = {};
     if (query.difficulty) where.difficulty = query.difficulty;
     if (query.language) where.language = query.language;
     if (query.search) {
-      where.OR = [
-        { title: { contains: query.search, mode: 'insensitive' } },
-        { description: { contains: query.search, mode: 'insensitive' } },
-      ];
+      where.OR = textSearch(["title", "description"], query.search);
     }
 
-    const [challenges, total] = await Promise.all([
-      this.prisma.codingChallenge.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          title: true,
-          slug: true,
-          difficulty: true,
-          language: true,
-          points: true,
-          _count: { select: { submissions: true } },
-        },
-      }),
-      this.prisma.codingChallenge.count({ where }),
-    ]);
-
-    return new PaginatedResult(challenges, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.codingChallenge.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            difficulty: true,
+            language: true,
+            points: true,
+            _count: { select: { submissions: true } },
+          },
+        }),
+      () => this.prisma.codingChallenge.count({ where }),
+      query,
+    );
   }
 
   async findBySlug(slug: string) {
     const challenge = await this.prisma.codingChallenge.findUnique({
       where: { slug },
     });
-    if (!challenge) throw new NotFoundException('Challenge not found');
+    if (!challenge) throw new NotFoundException("Challenge not found");
     return challenge;
   }
 
@@ -71,16 +74,19 @@ export class CodingService {
     const challenge = await this.prisma.codingChallenge.findUnique({
       where: { id: challengeId },
     });
-    if (!challenge) throw new NotFoundException('Challenge not found');
+    if (!challenge) throw new NotFoundException("Challenge not found");
 
-    const result = this.executeCode(dto.code, challenge.testCases as Record<string, unknown>[]);
+    const result = this.executeCode(
+      dto.code,
+      challenge.testCases as Record<string, unknown>[],
+    );
 
     return this.prisma.codingSubmission.create({
       data: {
         challengeId,
         userId,
         code: dto.code,
-        status: result.passed ? 'PASSED' : 'FAILED',
+        status: result.passed ? "PASSED" : "FAILED",
         output: result.output,
         executionTime: result.executionTime,
       },
@@ -90,15 +96,17 @@ export class CodingService {
   async runCode(dto: RunCodeDto) {
     try {
       const startTime = Date.now();
-      const context = vm.createContext({ console: { log: (...args: unknown[]) => args.join(' ') } });
+      const context = vm.createContext({
+        console: { log: (...args: unknown[]) => args.join(" ") },
+      });
       const result = vm.runInContext(dto.code, context, { timeout: 5000 });
       const executionTime = Date.now() - startTime;
-      return { output: String(result ?? ''), executionTime, error: null };
+      return { output: String(result ?? ""), executionTime, error: null };
     } catch (error) {
       return {
         output: null,
         executionTime: 0,
-        error: error instanceof Error ? error.message : 'Execution error',
+        error: error instanceof Error ? error.message : "Execution error",
       };
     }
   }
@@ -109,7 +117,7 @@ export class CodingService {
 
     return this.prisma.codingSubmission.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       take: 50,
     });
   }
@@ -122,23 +130,27 @@ export class CodingService {
     try {
       for (const testCase of testCases) {
         const context = vm.createContext({
-          console: { log: (...args: unknown[]) => outputs.push(args.join(' ')) },
+          console: {
+            log: (...args: unknown[]) => outputs.push(args.join(" ")),
+          },
         });
-        const wrappedCode = `${code}\n${testCase.test || ''}`;
+        const wrappedCode = `${code}\n${testCase.test || ""}`;
         const result = vm.runInContext(wrappedCode, context, { timeout: 5000 });
         if (testCase.expected !== undefined && result !== testCase.expected) {
           allPassed = false;
-          outputs.push(`Test failed: expected ${testCase.expected}, got ${result}`);
+          outputs.push(
+            `Test failed: expected ${testCase.expected}, got ${result}`,
+          );
         }
       }
     } catch (error) {
       allPassed = false;
-      outputs.push(error instanceof Error ? error.message : 'Runtime error');
+      outputs.push(error instanceof Error ? error.message : "Runtime error");
     }
 
     return {
       passed: allPassed,
-      output: outputs.join('\n'),
+      output: outputs.join("\n"),
       executionTime: Date.now() - startTime,
     };
   }

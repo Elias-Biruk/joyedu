@@ -1,5 +1,11 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { PrismaService } from '../common/prisma.service';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from "@nestjs/common";
+import { PrismaService } from "../common/prisma.service";
+import { findCourseOrThrow } from "../common/utils/entity.util";
+import { COURSE_CARD_INCLUDE } from "../common/utils/prisma-selects.util";
 
 @Injectable()
 export class WishlistService {
@@ -9,21 +15,14 @@ export class WishlistService {
     return this.prisma.wishlist.findMany({
       where: { userId },
       include: {
-        course: {
-          include: {
-            category: true,
-            instructor: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-            _count: { select: { enrollments: true, reviews: true } },
-          },
-        },
+        course: { include: COURSE_CARD_INCLUDE },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
     });
   }
 
   async addToWishlist(userId: string, courseId: string) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId } });
-    if (!course || course.deletedAt) throw new NotFoundException('Course not found');
+    await findCourseOrThrow(this.prisma, courseId);
 
     const existing = await this.prisma.wishlist.findUnique({
       where: { userId_courseId: { userId, courseId } },
@@ -40,8 +39,9 @@ export class WishlistService {
     const item = await this.prisma.wishlist.findUnique({
       where: { userId_courseId: { userId, courseId } },
     });
-    if (!item) throw new NotFoundException('Wishlist item not found');
-    if (item.userId !== userId) throw new ForbiddenException('Not your wishlist item');
+    if (!item) throw new NotFoundException("Wishlist item not found");
+    if (item.userId !== userId)
+      throw new ForbiddenException("Not your wishlist item");
 
     return this.prisma.wishlist.delete({
       where: { userId_courseId: { userId, courseId } },

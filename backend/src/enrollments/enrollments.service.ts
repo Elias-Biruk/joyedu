@@ -2,33 +2,37 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-} from '@nestjs/common';
-import { PrismaService } from '../common/prisma.service';
-import { EnrollDto, UpdateProgressDto } from './dto/enrollments.dto';
+} from "@nestjs/common";
+import { PrismaService } from "../common/prisma.service";
+import { EnrollDto, UpdateProgressDto } from "./dto/enrollments.dto";
+import { findCourseOrThrow } from "../common/utils/entity.util";
 
 @Injectable()
 export class EnrollmentsService {
   constructor(private prisma: PrismaService) {}
 
   async enroll(userId: string, dto: EnrollDto) {
-    const course = await this.prisma.course.findUnique({ where: { id: dto.courseId } });
-    if (!course || course.deletedAt) throw new NotFoundException('Course not found');
+    await findCourseOrThrow(this.prisma, dto.courseId);
 
     const existing = await this.prisma.enrollment.findUnique({
       where: { userId_courseId: { userId, courseId: dto.courseId } },
     });
-    if (existing) throw new ConflictException('Already enrolled');
+    if (existing) throw new ConflictException("Already enrolled");
 
     return this.prisma.enrollment.create({
       data: { userId, courseId: dto.courseId },
-      include: { course: { select: { id: true, title: true, slug: true, thumbnail: true } } },
+      include: {
+        course: {
+          select: { id: true, title: true, slug: true, thumbnail: true },
+        },
+      },
     });
   }
 
   async getMyEnrollments(userId: string) {
     return this.prisma.enrollment.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       include: {
         course: {
           select: {
@@ -52,10 +56,15 @@ export class EnrollmentsService {
         },
       },
     });
-    if (!enrollment) throw new NotFoundException('Enrollment not found');
+    if (!enrollment) throw new NotFoundException("Enrollment not found");
 
     const progress = await this.prisma.lessonProgress.upsert({
-      where: { enrollmentId_lessonId: { enrollmentId: enrollment.id, lessonId: dto.lessonId } },
+      where: {
+        enrollmentId_lessonId: {
+          enrollmentId: enrollment.id,
+          lessonId: dto.lessonId,
+        },
+      },
       update: {
         completed: dto.completed ?? false,
         watchTime: dto.watchTime ?? 0,
@@ -71,13 +80,16 @@ export class EnrollmentsService {
     });
 
     const totalLessons = await this.prisma.lesson.count({
-      where: { chapter: { course: { enrollments: { some: { id: enrollment.id } } } } },
+      where: {
+        chapter: { course: { enrollments: { some: { id: enrollment.id } } } },
+      },
     });
     const completedLessons = await this.prisma.lessonProgress.count({
       where: { enrollmentId: enrollment.id, completed: true },
     });
 
-    const courseProgress = totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0;
+    const courseProgress =
+      totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0;
 
     await this.prisma.enrollment.update({
       where: { id: enrollment.id },
@@ -102,7 +114,7 @@ export class EnrollmentsService {
         },
       },
     });
-    if (!enrollment) throw new NotFoundException('Enrollment not found');
+    if (!enrollment) throw new NotFoundException("Enrollment not found");
     return enrollment;
   }
 }

@@ -1,23 +1,35 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import * as bcrypt from 'bcryptjs';
-import { PrismaService } from '../common/prisma.service';
-import { PaginationDto, PaginatedResult } from '../common/dto/pagination.dto';
-import type { Role } from '@prisma/client';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
-import { ResetPasswordDto } from './dto/reset-password.dto';
-import { CourseModerationDto } from './dto/course-moderation.dto';
-import { PayoutActionDto } from './dto/payout-action.dto';
-import { CreateChallengeDto } from './dto/create-challenge.dto';
-import { UpdateChallengeDto } from './dto/update-challenge.dto';
-import { CreateFeatureFlagDto } from './dto/feature-flag.dto';
-import { UpdateFeatureFlagDto } from './dto/feature-flag.dto';
-import { CreatePlatformSettingDto } from './dto/platform-settings.dto';
-import { UpdatePlatformSettingDto } from './dto/platform-settings.dto';
-import { AuditLogFilterDto } from './dto/audit-log-filter.dto';
-import { UserFilterDto } from './dto/user-filter.dto';
-import { AnalyticsFilterDto } from './dto/analytics-filter.dto';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import * as bcrypt from "bcryptjs";
+import { PrismaService } from "../common/prisma.service";
+import { PaginationDto } from "../common/dto/pagination.dto";
+import { paginate, getPaginationMeta } from "../common/utils/pagination.util";
+import { textSearch } from "../common/utils/entity.util";
+import {
+  USER_BRIEF_WITH_EMAIL_SELECT,
+  USER_ADMIN_LIST_SELECT,
+} from "../common/utils/prisma-selects.util";
+import type { Role } from "@prisma/client";
+import { CreateUserDto } from "./dto/create-user.dto";
+import { UpdateUserDto } from "./dto/update-user.dto";
+import { ResetPasswordDto } from "./dto/reset-password.dto";
+import { CourseModerationDto } from "./dto/course-moderation.dto";
+import { PayoutActionDto } from "./dto/payout-action.dto";
+import { CreateChallengeDto } from "./dto/create-challenge.dto";
+import { UpdateChallengeDto } from "./dto/update-challenge.dto";
+import { CreateFeatureFlagDto } from "./dto/feature-flag.dto";
+import { UpdateFeatureFlagDto } from "./dto/feature-flag.dto";
+import { CreatePlatformSettingDto } from "./dto/platform-settings.dto";
+import { UpdatePlatformSettingDto } from "./dto/platform-settings.dto";
+import { AuditLogFilterDto } from "./dto/audit-log-filter.dto";
+import { UserFilterDto } from "./dto/user-filter.dto";
+import { AnalyticsFilterDto } from "./dto/analytics-filter.dto";
 
 @Injectable()
 export class AdminService {
@@ -29,7 +41,7 @@ export class AdminService {
       this.prisma.course.count({ where: { deletedAt: null } }),
       this.prisma.enrollment.count(),
       this.prisma.transaction.aggregate({
-        where: { status: 'COMPLETED' },
+        where: { status: "COMPLETED" },
         _sum: { amount: true },
         _count: true,
       }),
@@ -45,48 +57,34 @@ export class AdminService {
   }
 
   async getUsers(query: PaginationDto) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
-    const skip = (page - 1) * limit;
+    const { skip, take } = getPaginationMeta(query);
 
     const where: Record<string, unknown> = { deletedAt: null };
     if (query.search) {
-      where.OR = [
-        { email: { contains: query.search, mode: 'insensitive' } },
-        { firstName: { contains: query.search, mode: 'insensitive' } },
-        { lastName: { contains: query.search, mode: 'insensitive' } },
-      ];
+      where.OR = textSearch(["email", "firstName", "lastName"], query.search);
     }
 
-    const [users, total] = await Promise.all([
-      this.prisma.user.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          email: true,
-          username: true,
-          firstName: true,
-          lastName: true,
-          roles: true,
-          isActive: true,
-          isEmailVerified: true,
-          createdAt: true,
-        },
-      }),
-      this.prisma.user.count({ where }),
-    ]);
-
-    return new PaginatedResult(users, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.user.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { createdAt: "desc" },
+          select: USER_ADMIN_LIST_SELECT,
+        }),
+      () => this.prisma.user.count({ where }),
+      query,
+    );
   }
 
   async approveTeacher(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException("User not found");
 
-    const roles = user.roles.includes('TEACHER') ? user.roles : [...user.roles, 'TEACHER' as Role];
+    const roles = user.roles.includes("TEACHER")
+      ? user.roles
+      : [...user.roles, "TEACHER" as Role];
     return this.prisma.user.update({
       where: { id: userId },
       data: { roles },
@@ -95,7 +93,7 @@ export class AdminService {
 
   async toggleUserActive(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException("User not found");
 
     return this.prisma.user.update({
       where: { id: userId },
@@ -104,43 +102,45 @@ export class AdminService {
   }
 
   async getAuditLogs(query: PaginationDto) {
-    const page = query.page || 1;
-    const limit = query.limit || 50;
-    const skip = (page - 1) * limit;
+    const { skip, take } = getPaginationMeta({
+      ...query,
+      limit: query.limit || 50,
+    });
 
-    const [logs, total] = await Promise.all([
-      this.prisma.auditLog.findMany({
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: { user: { select: { email: true, firstName: true, lastName: true } } },
-      }),
-      this.prisma.auditLog.count(),
-    ]);
-
-    return new PaginatedResult(logs, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.auditLog.findMany({
+          skip,
+          take,
+          orderBy: { createdAt: "desc" },
+          include: {
+            user: { select: { email: true, firstName: true, lastName: true } },
+          },
+        }),
+      () => this.prisma.auditLog.count(),
+      { ...query, limit: query.limit || 50 },
+    );
   }
 
   async getFeatureFlags(query?: PaginationDto) {
-    const page = query?.page || 1;
-    const limit = query?.limit || 50;
-    const skip = (page - 1) * limit;
+    const params = { page: query?.page, limit: query?.limit || 50 };
+    const { skip, take } = getPaginationMeta(params);
 
-    const [flags, total] = await Promise.all([
-      this.prisma.featureFlag.findMany({
-        skip,
-        take: limit,
-        orderBy: { key: 'asc' },
-      }),
-      this.prisma.featureFlag.count(),
-    ]);
-
-    return new PaginatedResult(flags, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.featureFlag.findMany({
+          skip,
+          take,
+          orderBy: { key: "asc" },
+        }),
+      () => this.prisma.featureFlag.count(),
+      params,
+    );
   }
 
   async toggleFeatureFlag(id: string) {
     const flag = await this.prisma.featureFlag.findUnique({ where: { id } });
-    if (!flag) throw new NotFoundException('Feature flag not found');
+    if (!flag) throw new NotFoundException("Feature flag not found");
 
     return this.prisma.featureFlag.update({
       where: { id },
@@ -148,7 +148,13 @@ export class AdminService {
     });
   }
 
-  async createAuditLog(userId: string | null, action: string, entity: string, entityId?: string, metadata?: Prisma.InputJsonValue) {
+  async createAuditLog(
+    userId: string | null,
+    action: string,
+    entity: string,
+    entityId?: string,
+    metadata?: Prisma.InputJsonValue,
+  ) {
     return this.prisma.auditLog.create({
       data: { userId, action, entity, entityId, metadata },
     });
@@ -159,15 +165,22 @@ export class AdminService {
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     const [newUsers, newEnrollments, recentTransactions] = await Promise.all([
-      this.prisma.user.count({ where: { createdAt: { gte: thirtyDaysAgo }, deletedAt: null } }),
-      this.prisma.enrollment.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      this.prisma.user.count({
+        where: { createdAt: { gte: thirtyDaysAgo }, deletedAt: null },
+      }),
+      this.prisma.enrollment.count({
+        where: { createdAt: { gte: thirtyDaysAgo } },
+      }),
       this.prisma.transaction.findMany({
-        where: { createdAt: { gte: thirtyDaysAgo }, status: 'COMPLETED' },
+        where: { createdAt: { gte: thirtyDaysAgo }, status: "COMPLETED" },
         select: { amount: true, createdAt: true },
       }),
     ]);
 
-    const recentRevenue = recentTransactions.reduce((sum, t) => sum + Number(t.amount), 0);
+    const recentRevenue = recentTransactions.reduce(
+      (sum, t) => sum + Number(t.amount),
+      0,
+    );
 
     return {
       last30Days: {
@@ -180,67 +193,64 @@ export class AdminService {
   }
 
   async getCourses(query: PaginationDto) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
-    const skip = (page - 1) * limit;
+    const { skip, take } = getPaginationMeta(query);
 
     const where: Record<string, unknown> = { deletedAt: null };
     if (query.search) {
-      where.OR = [
-        { title: { contains: query.search, mode: 'insensitive' } },
-        { description: { contains: query.search, mode: 'insensitive' } },
-      ];
+      where.OR = textSearch(["title", "description"], query.search);
     }
 
-    const orderBy: Record<string, 'asc' | 'desc'> = {};
+    const orderBy: Record<string, "asc" | "desc"> = {};
     if (query.sortBy) {
-      orderBy[query.sortBy] = query.sortOrder || 'desc';
+      orderBy[query.sortBy] = query.sortOrder || "desc";
     } else {
-      orderBy.createdAt = 'desc';
+      orderBy.createdAt = "desc";
     }
 
-    const [courses, total] = await Promise.all([
-      this.prisma.course.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy,
-        include: {
-          category: true,
-          instructor: { select: { id: true, firstName: true, lastName: true, email: true } },
-          _count: { select: { enrollments: true, reviews: true } },
-        },
-      }),
-      this.prisma.course.count({ where }),
-    ]);
-
-    return new PaginatedResult(courses, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.course.findMany({
+          where,
+          skip,
+          take,
+          orderBy,
+          include: {
+            category: true,
+            instructor: { select: USER_BRIEF_WITH_EMAIL_SELECT },
+            _count: { select: { enrollments: true, reviews: true } },
+          },
+        }),
+      () => this.prisma.course.count({ where }),
+      query,
+    );
   }
 
   async getPayouts(query: PaginationDto) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
-    const skip = (page - 1) * limit;
+    const { skip, take } = getPaginationMeta(query);
 
-    const [payouts, total] = await Promise.all([
-      this.prisma.payout.findMany({
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          instructor: { select: { id: true, firstName: true, lastName: true, email: true } },
-        },
-      }),
-      this.prisma.payout.count(),
-    ]);
-
-    return new PaginatedResult(payouts, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.payout.findMany({
+          skip,
+          take,
+          orderBy: { createdAt: "desc" },
+          include: {
+            instructor: { select: USER_BRIEF_WITH_EMAIL_SELECT },
+          },
+        }),
+      () => this.prisma.payout.count(),
+      query,
+    );
   }
 
-  async getTransactions(query: PaginationDto & { status?: string; paymentMethod?: string; courseId?: string }) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
-    const skip = (page - 1) * limit;
+  async getTransactions(
+    query: PaginationDto & {
+      status?: string;
+      paymentMethod?: string;
+      courseId?: string;
+    },
+  ) {
+    const { skip, take } = getPaginationMeta(query);
 
     const where: Record<string, unknown> = {};
     if (query.status) {
@@ -253,21 +263,21 @@ export class AdminService {
       where.courseId = query.courseId;
     }
 
-    const [transactions, total] = await Promise.all([
-      this.prisma.transaction.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          user: { select: { id: true, firstName: true, lastName: true, email: true } },
-          course: { select: { id: true, title: true, slug: true } },
-        },
-      }),
-      this.prisma.transaction.count({ where }),
-    ]);
-
-    return new PaginatedResult(transactions, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.transaction.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { createdAt: "desc" },
+          include: {
+            user: { select: USER_BRIEF_WITH_EMAIL_SELECT },
+            course: { select: { id: true, title: true, slug: true } },
+          },
+        }),
+      () => this.prisma.transaction.count({ where }),
+      query,
+    );
   }
 
   async getPaymentStats() {
@@ -282,77 +292,81 @@ export class AdminService {
       paymentMethods,
     ] = await Promise.all([
       this.prisma.transaction.aggregate({
-        where: { status: 'COMPLETED' },
+        where: { status: "COMPLETED" },
         _sum: { amount: true },
       }),
       this.prisma.transaction.aggregate({
-        where: { status: 'COMPLETED', paymentMethod: 'STRIPE' },
+        where: { status: "COMPLETED", paymentMethod: "STRIPE" },
         _sum: { amount: true },
         _count: true,
       }),
       this.prisma.transaction.aggregate({
-        where: { status: 'COMPLETED', paymentMethod: 'TELEBIRR' },
+        where: { status: "COMPLETED", paymentMethod: "TELEBIRR" },
         _sum: { amount: true },
         _count: true,
       }),
-      this.prisma.transaction.count({ where: { status: 'COMPLETED' } }),
-      this.prisma.transaction.count({ where: { status: 'FAILED' } }),
-      this.prisma.transaction.count({ where: { status: 'PENDING' } }),
-      this.prisma.transaction.count({ where: { status: 'REFUNDED' } }),
+      this.prisma.transaction.count({ where: { status: "COMPLETED" } }),
+      this.prisma.transaction.count({ where: { status: "FAILED" } }),
+      this.prisma.transaction.count({ where: { status: "PENDING" } }),
+      this.prisma.transaction.count({ where: { status: "REFUNDED" } }),
       this.prisma.transaction.groupBy({
-        by: ['paymentMethod'],
+        by: ["paymentMethod"],
         _count: true,
       }),
     ]);
 
     return {
-      totalRevenue: totalRevenue._sum.amount ? Number(totalRevenue._sum.amount) : 0,
+      totalRevenue: totalRevenue._sum.amount
+        ? Number(totalRevenue._sum.amount)
+        : 0,
       stripeRevenue: {
-        amount: stripeRevenue._sum.amount ? Number(stripeRevenue._sum.amount) : 0,
+        amount: stripeRevenue._sum.amount
+          ? Number(stripeRevenue._sum.amount)
+          : 0,
         count: stripeRevenue._count,
       },
       telebirrRevenue: {
-        amount: telebirrRevenue._sum.amount ? Number(telebirrRevenue._sum.amount) : 0,
+        amount: telebirrRevenue._sum.amount
+          ? Number(telebirrRevenue._sum.amount)
+          : 0,
         count: telebirrRevenue._count,
       },
       successfulPayments,
       failedPayments,
       pendingPayments,
       refundedPayments,
-      paymentMethods: paymentMethods.reduce((acc, item) => {
-        acc[item.paymentMethod] = item._count;
-        return acc;
-      }, {} as Record<string, number>),
+      paymentMethods: paymentMethods.reduce(
+        (acc, item) => {
+          acc[item.paymentMethod] = item._count;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
     };
   }
 
   async getChallenges(query: PaginationDto) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
-    const skip = (page - 1) * limit;
+    const { skip, take } = getPaginationMeta(query);
 
     const where: Record<string, unknown> = {};
     if (query.search) {
-      where.OR = [
-        { title: { contains: query.search, mode: 'insensitive' } },
-        { description: { contains: query.search, mode: 'insensitive' } },
-      ];
+      where.OR = textSearch(["title", "description"], query.search);
     }
 
-    const [challenges, total] = await Promise.all([
-      this.prisma.codingChallenge.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          _count: { select: { submissions: true } },
-        },
-      }),
-      this.prisma.codingChallenge.count({ where }),
-    ]);
-
-    return new PaginatedResult(challenges, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.codingChallenge.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { createdAt: "desc" },
+          include: {
+            _count: { select: { submissions: true } },
+          },
+        }),
+      () => this.prisma.codingChallenge.count({ where }),
+      query,
+    );
   }
 
   // ==================== USER MANAGEMENT ====================
@@ -368,7 +382,9 @@ export class AdminService {
     });
 
     if (existingUser) {
-      throw new ConflictException('User with this email or username already exists');
+      throw new ConflictException(
+        "User with this email or username already exists",
+      );
     }
 
     const passwordHash = await bcrypt.hash(createUserDto.password, 10);
@@ -397,7 +413,10 @@ export class AdminService {
       },
     });
 
-    await this.createAuditLog(adminId, 'USER_CREATED', 'User', user.id, { email: user.email, roles: user.roles });
+    await this.createAuditLog(adminId, "USER_CREATED", "User", user.id, {
+      email: user.email,
+      roles: user.roles,
+    });
 
     return user;
   }
@@ -434,46 +453,56 @@ export class AdminService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
     return user;
   }
 
-  async updateUser(userId: string, updateUserDto: UpdateUserDto, adminId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId, deletedAt: null } });
+  async updateUser(
+    userId: string,
+    updateUserDto: UpdateUserDto,
+    adminId: string,
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
     // Prevent admin from modifying their own role
     if (userId === adminId && updateUserDto.roles) {
-      throw new ForbiddenException('Cannot modify your own roles');
+      throw new ForbiddenException("Cannot modify your own roles");
     }
 
     // Prevent admin from deactivating themselves
     if (userId === adminId && updateUserDto.isActive === false) {
-      throw new ForbiddenException('Cannot deactivate yourself');
+      throw new ForbiddenException("Cannot deactivate yourself");
     }
 
     // Prevent removing the last admin
-    if (updateUserDto.roles && !updateUserDto.roles.includes('ADMIN') && user.roles.includes('ADMIN')) {
+    if (
+      updateUserDto.roles &&
+      !updateUserDto.roles.includes("ADMIN") &&
+      user.roles.includes("ADMIN")
+    ) {
       const adminCount = await this.prisma.user.count({
         where: {
-          roles: { has: 'ADMIN' },
+          roles: { has: "ADMIN" },
           isActive: true,
           deletedAt: null,
         },
       });
 
       if (adminCount <= 1) {
-        throw new BadRequestException('Cannot remove the last admin role');
+        throw new BadRequestException("Cannot remove the last admin role");
       }
     }
 
     // Prevent role arrays from becoming empty
     if (updateUserDto.roles && updateUserDto.roles.length === 0) {
-      throw new BadRequestException('Users must have at least one role');
+      throw new BadRequestException("Users must have at least one role");
     }
 
     const updateData: Prisma.UserUpdateInput = {};
@@ -482,9 +511,12 @@ export class AdminService {
     if (updateUserDto.firstName) updateData.firstName = updateUserDto.firstName;
     if (updateUserDto.lastName) updateData.lastName = updateUserDto.lastName;
     if (updateUserDto.bio !== undefined) updateData.bio = updateUserDto.bio;
-    if (updateUserDto.avatar !== undefined) updateData.avatar = updateUserDto.avatar;
-    if (updateUserDto.isActive !== undefined) updateData.isActive = updateUserDto.isActive;
-    if (updateUserDto.isEmailVerified !== undefined) updateData.isEmailVerified = updateUserDto.isEmailVerified;
+    if (updateUserDto.avatar !== undefined)
+      updateData.avatar = updateUserDto.avatar;
+    if (updateUserDto.isActive !== undefined)
+      updateData.isActive = updateUserDto.isActive;
+    if (updateUserDto.isEmailVerified !== undefined)
+      updateData.isEmailVerified = updateUserDto.isEmailVerified;
     if (updateUserDto.roles) updateData.roles = updateUserDto.roles;
     if (updateUserDto.password) {
       updateData.passwordHash = await bcrypt.hash(updateUserDto.password, 10);
@@ -506,34 +538,38 @@ export class AdminService {
       },
     });
 
-    await this.createAuditLog(adminId, 'USER_UPDATED', 'User', userId, { changes: { ...updateUserDto } });
+    await this.createAuditLog(adminId, "USER_UPDATED", "User", userId, {
+      changes: { ...updateUserDto },
+    });
 
     return updatedUser;
   }
 
   async softDeleteUser(userId: string, adminId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId, deletedAt: null } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
     // Prevent admin from deleting themselves
     if (userId === adminId) {
-      throw new ForbiddenException('Cannot delete yourself');
+      throw new ForbiddenException("Cannot delete yourself");
     }
 
     // Prevent deleting the last admin
-    if (user.roles.includes('ADMIN')) {
+    if (user.roles.includes("ADMIN")) {
       const adminCount = await this.prisma.user.count({
         where: {
-          roles: { has: 'ADMIN' },
+          roles: { has: "ADMIN" },
           isActive: true,
           deletedAt: null,
         },
       });
 
       if (adminCount <= 1) {
-        throw new BadRequestException('Cannot delete the last admin');
+        throw new BadRequestException("Cannot delete the last admin");
       }
     }
 
@@ -542,20 +578,24 @@ export class AdminService {
       data: { deletedAt: new Date() },
     });
 
-    await this.createAuditLog(adminId, 'USER_DELETED', 'User', userId, { email: user.email });
+    await this.createAuditLog(adminId, "USER_DELETED", "User", userId, {
+      email: user.email,
+    });
 
-    return { message: 'User soft deleted successfully' };
+    return { message: "User soft deleted successfully" };
   }
 
   async suspendUser(userId: string, adminId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId, deletedAt: null } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
     // Prevent admin from suspending themselves
     if (userId === adminId) {
-      throw new ForbiddenException('Cannot suspend yourself');
+      throw new ForbiddenException("Cannot suspend yourself");
     }
 
     if (user.isActive) {
@@ -564,16 +604,20 @@ export class AdminService {
         data: { isActive: false },
       });
 
-      await this.createAuditLog(adminId, 'USER_SUSPENDED', 'User', userId, { email: user.email });
+      await this.createAuditLog(adminId, "USER_SUSPENDED", "User", userId, {
+        email: user.email,
+      });
     }
 
-    return { message: 'User suspended successfully' };
+    return { message: "User suspended successfully" };
   }
 
   async reactivateUser(userId: string, adminId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId, deletedAt: null } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
     if (!user.isActive) {
@@ -582,16 +626,24 @@ export class AdminService {
         data: { isActive: true },
       });
 
-      await this.createAuditLog(adminId, 'USER_REACTIVATED', 'User', userId, { email: user.email });
+      await this.createAuditLog(adminId, "USER_REACTIVATED", "User", userId, {
+        email: user.email,
+      });
     }
 
-    return { message: 'User reactivated successfully' };
+    return { message: "User reactivated successfully" };
   }
 
-  async resetUserPassword(userId: string, resetPasswordDto: ResetPasswordDto, adminId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId, deletedAt: null } });
+  async resetUserPassword(
+    userId: string,
+    resetPasswordDto: ResetPasswordDto,
+    adminId: string,
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
     const passwordHash = await bcrypt.hash(resetPasswordDto.newPassword, 10);
@@ -601,24 +653,28 @@ export class AdminService {
       data: { passwordHash },
     });
 
-    await this.createAuditLog(adminId, 'PASSWORD_RESET', 'User', userId, { email: user.email });
+    await this.createAuditLog(adminId, "PASSWORD_RESET", "User", userId, {
+      email: user.email,
+    });
 
-    return { message: 'Password reset successfully' };
+    return { message: "Password reset successfully" };
   }
 
   async verifyTeacher(userId: string, adminId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId, deletedAt: null } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
-    if (user.roles.includes('TEACHER')) {
-      throw new BadRequestException('User is already a teacher');
+    if (user.roles.includes("TEACHER")) {
+      throw new BadRequestException("User is already a teacher");
     }
 
     const updatedUser = await this.prisma.user.update({
       where: { id: userId },
-      data: { roles: [...user.roles, 'TEACHER'] },
+      data: { roles: [...user.roles, "TEACHER"] },
       select: {
         id: true,
         email: true,
@@ -628,41 +684,45 @@ export class AdminService {
       },
     });
 
-    await this.createAuditLog(adminId, 'TEACHER_VERIFIED', 'User', userId, { email: user.email });
+    await this.createAuditLog(adminId, "TEACHER_VERIFIED", "User", userId, {
+      email: user.email,
+    });
 
     return updatedUser;
   }
 
   async removeTeacherRole(userId: string, adminId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId, deletedAt: null } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
-    if (!user.roles.includes('TEACHER')) {
-      throw new BadRequestException('User is not a teacher');
+    if (!user.roles.includes("TEACHER")) {
+      throw new BadRequestException("User is not a teacher");
     }
 
     // Prevent removing the last admin role
-    if (user.roles.includes('ADMIN')) {
+    if (user.roles.includes("ADMIN")) {
       const adminCount = await this.prisma.user.count({
         where: {
-          roles: { has: 'ADMIN' },
+          roles: { has: "ADMIN" },
           isActive: true,
           deletedAt: null,
         },
       });
 
       if (adminCount <= 1) {
-        throw new BadRequestException('Cannot remove the last admin role');
+        throw new BadRequestException("Cannot remove the last admin role");
       }
     }
 
-    const updatedRoles = user.roles.filter((role) => role !== 'TEACHER');
+    const updatedRoles = user.roles.filter((role) => role !== "TEACHER");
 
     // Prevent role arrays from becoming empty
     if (updatedRoles.length === 0) {
-      throw new BadRequestException('Users must have at least one role');
+      throw new BadRequestException("Users must have at least one role");
     }
 
     const updatedUser = await this.prisma.user.update({
@@ -677,25 +737,23 @@ export class AdminService {
       },
     });
 
-    await this.createAuditLog(adminId, 'TEACHER_ROLE_REMOVED', 'User', userId, { email: user.email });
+    await this.createAuditLog(adminId, "TEACHER_ROLE_REMOVED", "User", userId, {
+      email: user.email,
+    });
 
     return updatedUser;
   }
 
   async getUsersWithFilters(filter: UserFilterDto) {
-    const page = filter.page || 1;
-    const limit = filter.limit || 20;
-    const skip = (page - 1) * limit;
+    const { skip, take } = getPaginationMeta(filter);
 
     const where: Record<string, unknown> = { deletedAt: null };
 
     if (filter.search) {
-      where.OR = [
-        { email: { contains: filter.search, mode: 'insensitive' } },
-        { firstName: { contains: filter.search, mode: 'insensitive' } },
-        { lastName: { contains: filter.search, mode: 'insensitive' } },
-        { username: { contains: filter.search, mode: 'insensitive' } },
-      ];
+      where.OR = textSearch(
+        ["email", "firstName", "lastName", "username"],
+        filter.search,
+      );
     }
 
     if (filter.role) {
@@ -710,62 +768,63 @@ export class AdminService {
       where.isEmailVerified = filter.isEmailVerified;
     }
 
-    const orderBy: Record<string, 'asc' | 'desc'> = {};
+    const orderBy: Record<string, "asc" | "desc"> = {};
     if (filter.dateSort) {
-      orderBy.createdAt = filter.dateSort === 'newest' ? 'desc' : 'asc';
+      orderBy.createdAt = filter.dateSort === "newest" ? "desc" : "asc";
     } else if (filter.nameSort) {
       orderBy.username = filter.nameSort;
     } else if (filter.sortBy) {
-      orderBy[filter.sortBy] = filter.sortOrder || 'desc';
+      orderBy[filter.sortBy] = filter.sortOrder || "desc";
     } else {
-      orderBy.createdAt = 'desc';
+      orderBy.createdAt = "desc";
     }
 
-    const [users, total] = await Promise.all([
-      this.prisma.user.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy,
-        select: {
-          id: true,
-          email: true,
-          username: true,
-          firstName: true,
-          lastName: true,
-          roles: true,
-          isActive: true,
-          isEmailVerified: true,
-          createdAt: true,
-          _count: {
-            select: {
-              enrollments: true,
-              taughtCourses: true,
-              reviews: true,
+    return paginate(
+      () =>
+        this.prisma.user.findMany({
+          where,
+          skip,
+          take,
+          orderBy,
+          select: {
+            ...USER_ADMIN_LIST_SELECT,
+            _count: {
+              select: {
+                enrollments: true,
+                taughtCourses: true,
+                reviews: true,
+              },
             },
           },
-        },
-      }),
-      this.prisma.user.count({ where }),
-    ]);
-
-    return new PaginatedResult(users, total, page, limit);
+        }),
+      () => this.prisma.user.count({ where }),
+      filter,
+    );
   }
 
   // ==================== COURSE MANAGEMENT ====================
 
-  async moderateCourse(courseId: string, moderationDto: CourseModerationDto, adminId: string) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId, deletedAt: null } });
+  async moderateCourse(
+    courseId: string,
+    moderationDto: CourseModerationDto,
+    adminId: string,
+  ) {
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId, deletedAt: null },
+    });
     if (!course) {
-      throw new NotFoundException('Course not found');
+      throw new NotFoundException("Course not found");
     }
 
     const updateData: Prisma.CourseUpdateInput = {};
     if (moderationDto.title) updateData.title = moderationDto.title;
-    if (moderationDto.description) updateData.description = moderationDto.description;
-    if (moderationDto.price !== undefined) updateData.price = moderationDto.price;
+    if (moderationDto.description)
+      updateData.description = moderationDto.description;
+    if (moderationDto.price !== undefined)
+      updateData.price = moderationDto.price;
     if (moderationDto.status) updateData.status = moderationDto.status;
-    if (moderationDto.isFeatured !== undefined) updateData.isFeatured = moderationDto.isFeatured;
+    if (moderationDto.isFeatured !== undefined)
+      updateData.isFeatured = moderationDto.isFeatured;
 
     // Never allow instructorId to be modified by admins - preserves teacher ownership
     // Admins can only moderate status and featured status, not become course owners
@@ -774,12 +833,12 @@ export class AdminService {
       where: { id: courseId },
       data: updateData,
       include: {
-        instructor: { select: { id: true, firstName: true, lastName: true, email: true } },
+        instructor: { select: USER_BRIEF_WITH_EMAIL_SELECT },
         category: true,
       },
     });
 
-    await this.createAuditLog(adminId, 'COURSE_MODERATED', 'Course', courseId, {
+    await this.createAuditLog(adminId, "COURSE_MODERATED", "Course", courseId, {
       status: moderationDto.status,
       isFeatured: moderationDto.isFeatured,
       reason: moderationDto.moderationReason,
@@ -789,47 +848,61 @@ export class AdminService {
   }
 
   async publishCourse(courseId: string, adminId: string) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId, deletedAt: null } });
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId, deletedAt: null },
+    });
     if (!course) {
-      throw new NotFoundException('Course not found');
+      throw new NotFoundException("Course not found");
     }
 
     const updatedCourse = await this.prisma.course.update({
       where: { id: courseId },
-      data: { status: 'PUBLISHED', publishedAt: new Date() },
+      data: { status: "PUBLISHED", publishedAt: new Date() },
       include: {
-        instructor: { select: { id: true, firstName: true, lastName: true, email: true } },
+        instructor: { select: USER_BRIEF_WITH_EMAIL_SELECT },
       },
     });
 
-    await this.createAuditLog(adminId, 'COURSE_PUBLISHED', 'Course', courseId, { title: course.title });
+    await this.createAuditLog(adminId, "COURSE_PUBLISHED", "Course", courseId, {
+      title: course.title,
+    });
 
     return updatedCourse;
   }
 
   async unpublishCourse(courseId: string, adminId: string) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId, deletedAt: null } });
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId, deletedAt: null },
+    });
     if (!course) {
-      throw new NotFoundException('Course not found');
+      throw new NotFoundException("Course not found");
     }
 
     const updatedCourse = await this.prisma.course.update({
       where: { id: courseId },
-      data: { status: 'DRAFT' },
+      data: { status: "DRAFT" },
       include: {
-        instructor: { select: { id: true, firstName: true, lastName: true, email: true } },
+        instructor: { select: USER_BRIEF_WITH_EMAIL_SELECT },
       },
     });
 
-    await this.createAuditLog(adminId, 'COURSE_UNPUBLISHED', 'Course', courseId, { title: course.title });
+    await this.createAuditLog(
+      adminId,
+      "COURSE_UNPUBLISHED",
+      "Course",
+      courseId,
+      { title: course.title },
+    );
 
     return updatedCourse;
   }
 
   async featureCourse(courseId: string, adminId: string) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId, deletedAt: null } });
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId, deletedAt: null },
+    });
     if (!course) {
-      throw new NotFoundException('Course not found');
+      throw new NotFoundException("Course not found");
     }
 
     const updatedCourse = await this.prisma.course.update({
@@ -837,15 +910,19 @@ export class AdminService {
       data: { isFeatured: true },
     });
 
-    await this.createAuditLog(adminId, 'COURSE_FEATURED', 'Course', courseId, { title: course.title });
+    await this.createAuditLog(adminId, "COURSE_FEATURED", "Course", courseId, {
+      title: course.title,
+    });
 
     return updatedCourse;
   }
 
   async unfeatureCourse(courseId: string, adminId: string) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId, deletedAt: null } });
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId, deletedAt: null },
+    });
     if (!course) {
-      throw new NotFoundException('Course not found');
+      throw new NotFoundException("Course not found");
     }
 
     const updatedCourse = await this.prisma.course.update({
@@ -853,31 +930,43 @@ export class AdminService {
       data: { isFeatured: false },
     });
 
-    await this.createAuditLog(adminId, 'COURSE_UNFEATURED', 'Course', courseId, { title: course.title });
+    await this.createAuditLog(
+      adminId,
+      "COURSE_UNFEATURED",
+      "Course",
+      courseId,
+      { title: course.title },
+    );
 
     return updatedCourse;
   }
 
   async archiveCourse(courseId: string, adminId: string) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId, deletedAt: null } });
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId, deletedAt: null },
+    });
     if (!course) {
-      throw new NotFoundException('Course not found');
+      throw new NotFoundException("Course not found");
     }
 
     const updatedCourse = await this.prisma.course.update({
       where: { id: courseId },
-      data: { status: 'ARCHIVED' },
+      data: { status: "ARCHIVED" },
     });
 
-    await this.createAuditLog(adminId, 'COURSE_ARCHIVED', 'Course', courseId, { title: course.title });
+    await this.createAuditLog(adminId, "COURSE_ARCHIVED", "Course", courseId, {
+      title: course.title,
+    });
 
     return updatedCourse;
   }
 
   async deleteCourse(courseId: string, adminId: string) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId, deletedAt: null } });
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId, deletedAt: null },
+    });
     if (!course) {
-      throw new NotFoundException('Course not found');
+      throw new NotFoundException("Course not found");
     }
 
     await this.prisma.course.update({
@@ -885,20 +974,24 @@ export class AdminService {
       data: { deletedAt: new Date() },
     });
 
-    await this.createAuditLog(adminId, 'COURSE_DELETED', 'Course', courseId, { title: course.title });
+    await this.createAuditLog(adminId, "COURSE_DELETED", "Course", courseId, {
+      title: course.title,
+    });
 
-    return { message: 'Course deleted successfully' };
+    return { message: "Course deleted successfully" };
   }
 
   // ==================== COMPREHENSIVE ANALYTICS ====================
 
   async getComprehensiveAnalytics(filter: AnalyticsFilterDto) {
     const now = new Date();
-    const startDate = filter.startDate ? new Date(filter.startDate) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const startDate = filter.startDate
+      ? new Date(filter.startDate)
+      : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const endDate = filter.endDate ? new Date(filter.endDate) : now;
 
     if (startDate > endDate) {
-      throw new BadRequestException('Start date must be before end date');
+      throw new BadRequestException("Start date must be before end date");
     }
 
     const [
@@ -917,11 +1010,15 @@ export class AdminService {
       this.prisma.user.count({
         where: {
           deletedAt: null,
-          lastLoginAt: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) },
+          lastLoginAt: {
+            gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+          },
         },
       }),
       this.prisma.course.count({ where: { deletedAt: null } }),
-      this.prisma.course.count({ where: { status: 'PUBLISHED', deletedAt: null } }),
+      this.prisma.course.count({
+        where: { status: "PUBLISHED", deletedAt: null },
+      }),
       this.prisma.enrollment.count({
         where: {
           user: { deletedAt: null },
@@ -929,7 +1026,7 @@ export class AdminService {
         },
       }),
       this.prisma.transaction.aggregate({
-        where: { status: 'COMPLETED' },
+        where: { status: "COMPLETED" },
         _sum: { amount: true },
       }),
       this.prisma.user.count({
@@ -939,7 +1036,7 @@ export class AdminService {
         },
       }),
       this.prisma.enrollment.count({
-        where: { 
+        where: {
           createdAt: { gte: startDate, lte: endDate },
           user: { deletedAt: null },
           course: { deletedAt: null },
@@ -979,7 +1076,7 @@ export class AdminService {
 
     const teachers = await this.prisma.user.findMany({
       where: {
-        roles: { has: 'TEACHER' },
+        roles: { has: "TEACHER" },
         deletedAt: null,
         ...where,
       },
@@ -1001,25 +1098,36 @@ export class AdminService {
           },
         },
         payoutsReceived: {
-          where: { status: 'COMPLETED' },
+          where: { status: "COMPLETED" },
           select: { amount: true },
         },
       },
     });
 
     return teachers.map((teacher) => {
-      const totalEnrollments = teacher.taughtCourses.reduce((sum, course) => sum + course._count.enrollments, 0);
-      const totalReviews = teacher.taughtCourses.reduce((sum, course) => sum + course._count.reviews, 0);
+      const totalEnrollments = teacher.taughtCourses.reduce(
+        (sum, course) => sum + course._count.enrollments,
+        0,
+      );
+      const totalReviews = teacher.taughtCourses.reduce(
+        (sum, course) => sum + course._count.reviews,
+        0,
+      );
       const avgRating =
         totalReviews > 0
           ? teacher.taughtCourses.reduce((sum, course) => {
-              const courseAvg = course.reviews.length > 0
-                ? course.reviews.reduce((rSum, r) => rSum + r.rating, 0) / course.reviews.length
-                : 0;
+              const courseAvg =
+                course.reviews.length > 0
+                  ? course.reviews.reduce((rSum, r) => rSum + r.rating, 0) /
+                    course.reviews.length
+                  : 0;
               return sum + courseAvg;
             }, 0) / teacher.taughtCourses.length
           : 0;
-      const totalEarnings = teacher.payoutsReceived.reduce((sum, payout) => sum + Number(payout.amount), 0);
+      const totalEarnings = teacher.payoutsReceived.reduce(
+        (sum, payout) => sum + Number(payout.amount),
+        0,
+      );
 
       return {
         id: teacher.id,
@@ -1036,7 +1144,7 @@ export class AdminService {
 
   private async getStudentEngagement(startDate: Date, endDate: Date) {
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { 
+      where: {
         createdAt: { gte: startDate, lte: endDate },
         user: { deletedAt: null },
         course: { deletedAt: null },
@@ -1048,9 +1156,9 @@ export class AdminService {
     });
 
     const lessonProgress = await this.prisma.lessonProgress.findMany({
-      where: { 
+      where: {
         createdAt: { gte: startDate, lte: endDate },
-        enrollment: { 
+        enrollment: {
           user: { deletedAt: null },
           course: { deletedAt: null },
         },
@@ -1058,7 +1166,7 @@ export class AdminService {
     });
 
     const completedCourses = await this.prisma.enrollment.count({
-      where: { 
+      where: {
         completedAt: { gte: startDate, lte: endDate },
         user: { deletedAt: null },
         course: { deletedAt: null },
@@ -1074,13 +1182,15 @@ export class AdminService {
   }
 
   async getGrowthMetrics(filter: AnalyticsFilterDto) {
-    const granularity = filter.granularity || 'daily';
+    const granularity = filter.granularity || "daily";
     const now = new Date();
-    const startDate = filter.startDate ? new Date(filter.startDate) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const startDate = filter.startDate
+      ? new Date(filter.startDate)
+      : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const endDate = filter.endDate ? new Date(filter.endDate) : now;
 
     if (startDate > endDate) {
-      throw new BadRequestException('Start date must be before end date');
+      throw new BadRequestException("Start date must be before end date");
     }
 
     const timeSeriesData = [];
@@ -1091,18 +1201,18 @@ export class AdminService {
       let periodEnd: Date;
 
       switch (granularity) {
-        case 'daily':
+        case "daily":
           periodEnd = new Date(currentDate);
           periodEnd.setHours(23, 59, 59, 999);
           currentDate.setDate(currentDate.getDate() + 1);
           break;
-        case 'weekly':
+        case "weekly":
           periodEnd = new Date(currentDate);
           periodEnd.setDate(periodEnd.getDate() + 6);
           periodEnd.setHours(23, 59, 59, 999);
           currentDate.setDate(currentDate.getDate() + 7);
           break;
-        case 'monthly':
+        case "monthly":
           periodEnd = new Date(currentDate);
           periodEnd.setMonth(periodEnd.getMonth() + 1);
           periodEnd.setDate(0);
@@ -1119,7 +1229,7 @@ export class AdminService {
           },
         }),
         this.prisma.enrollment.count({
-          where: { 
+          where: {
             createdAt: { gte: periodStart, lte: periodEnd },
             user: { deletedAt: null },
             course: { deletedAt: null },
@@ -1128,14 +1238,14 @@ export class AdminService {
         this.prisma.transaction.aggregate({
           where: {
             createdAt: { gte: periodStart, lte: periodEnd },
-            status: 'COMPLETED',
+            status: "COMPLETED",
           },
           _sum: { amount: true },
         }),
       ]);
 
       timeSeriesData.push({
-        period: periodStart.toISOString().split('T')[0],
+        period: periodStart.toISOString().split("T")[0],
         newUsers,
         newEnrollments,
         revenue: Number(revenue._sum.amount || 0),
@@ -1147,18 +1257,22 @@ export class AdminService {
 
   // ==================== PAYOUT MANAGEMENT ====================
 
-  async approvePayout(payoutId: string, payoutActionDto: PayoutActionDto, adminId: string) {
+  async approvePayout(
+    payoutId: string,
+    payoutActionDto: PayoutActionDto,
+    adminId: string,
+  ) {
     const payout = await this.prisma.payout.findUnique({
       where: { id: payoutId },
       include: { instructor: true },
     });
 
     if (!payout) {
-      throw new NotFoundException('Payout not found');
+      throw new NotFoundException("Payout not found");
     }
 
-    if (payout.status !== 'PENDING') {
-      throw new BadRequestException('Payout is not in pending status');
+    if (payout.status !== "PENDING") {
+      throw new BadRequestException("Payout is not in pending status");
     }
 
     const updatedPayout = await this.prisma.payout.update({
@@ -1166,10 +1280,10 @@ export class AdminService {
       data: {
         status: payoutActionDto.status,
       },
-      include: { instructor: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      include: { instructor: { select: USER_BRIEF_WITH_EMAIL_SELECT } },
     });
 
-    await this.createAuditLog(adminId, 'PAYOUT_APPROVED', 'Payout', payoutId, {
+    await this.createAuditLog(adminId, "PAYOUT_APPROVED", "Payout", payoutId, {
       amount: payout.amount,
       instructorId: payout.instructorId,
       notes: payoutActionDto.notes,
@@ -1178,29 +1292,33 @@ export class AdminService {
     return updatedPayout;
   }
 
-  async rejectPayout(payoutId: string, payoutActionDto: PayoutActionDto, adminId: string) {
+  async rejectPayout(
+    payoutId: string,
+    payoutActionDto: PayoutActionDto,
+    adminId: string,
+  ) {
     const payout = await this.prisma.payout.findUnique({
       where: { id: payoutId },
       include: { instructor: true },
     });
 
     if (!payout) {
-      throw new NotFoundException('Payout not found');
+      throw new NotFoundException("Payout not found");
     }
 
-    if (payout.status !== 'PENDING') {
-      throw new BadRequestException('Payout is not in pending status');
+    if (payout.status !== "PENDING") {
+      throw new BadRequestException("Payout is not in pending status");
     }
 
     const updatedPayout = await this.prisma.payout.update({
       where: { id: payoutId },
       data: {
-        status: 'FAILED',
+        status: "FAILED",
       },
-      include: { instructor: { select: { id: true, firstName: true, lastName: true, email: true } } },
+      include: { instructor: { select: USER_BRIEF_WITH_EMAIL_SELECT } },
     });
 
-    await this.createAuditLog(adminId, 'PAYOUT_REJECTED', 'Payout', payoutId, {
+    await this.createAuditLog(adminId, "PAYOUT_REJECTED", "Payout", payoutId, {
       amount: payout.amount,
       instructorId: payout.instructorId,
       notes: payoutActionDto.notes,
@@ -1210,29 +1328,28 @@ export class AdminService {
   }
 
   async getPayoutHistory(instructorId?: string, query?: PaginationDto) {
-    const page = query?.page || 1;
-    const limit = query?.limit || 20;
-    const skip = (page - 1) * limit;
+    const params = { page: query?.page, limit: query?.limit };
+    const { skip, take } = getPaginationMeta(params);
 
     const where: Record<string, unknown> = {};
     if (instructorId) {
       where.instructorId = instructorId;
     }
 
-    const [payouts, total] = await Promise.all([
-      this.prisma.payout.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          instructor: { select: { id: true, firstName: true, lastName: true, email: true } },
-        },
-      }),
-      this.prisma.payout.count({ where }),
-    ]);
-
-    return new PaginatedResult(payouts, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.payout.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { createdAt: "desc" },
+          include: {
+            instructor: { select: USER_BRIEF_WITH_EMAIL_SELECT },
+          },
+        }),
+      () => this.prisma.payout.count({ where }),
+      params,
+    );
   }
 
   async getTeacherEarnings(instructorId: string) {
@@ -1253,7 +1370,7 @@ export class AdminService {
           },
         },
         payoutsReceived: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           select: {
             id: true,
             amount: true,
@@ -1267,7 +1384,7 @@ export class AdminService {
     });
 
     if (!instructor) {
-      throw new NotFoundException('Instructor not found');
+      throw new NotFoundException("Instructor not found");
     }
 
     const totalCourseRevenue = instructor.taughtCourses.reduce(
@@ -1275,10 +1392,10 @@ export class AdminService {
       0,
     );
     const totalPaidOut = instructor.payoutsReceived
-      .filter((p) => p.status === 'COMPLETED')
+      .filter((p) => p.status === "COMPLETED")
       .reduce((sum, p) => sum + Number(p.amount), 0);
     const pendingPayouts = instructor.payoutsReceived
-      .filter((p) => p.status === 'PENDING')
+      .filter((p) => p.status === "PENDING")
       .reduce((sum, p) => sum + Number(p.amount), 0);
 
     return {
@@ -1306,15 +1423,21 @@ export class AdminService {
     const where: Record<string, unknown> = {};
     if (filter.startDate || filter.endDate) {
       where.createdAt = {};
-      if (filter.startDate) (where.createdAt as Record<string, unknown>).gte = new Date(filter.startDate);
-      if (filter.endDate) (where.createdAt as Record<string, unknown>).lte = new Date(filter.endDate);
+      if (filter.startDate)
+        (where.createdAt as Record<string, unknown>).gte = new Date(
+          filter.startDate,
+        );
+      if (filter.endDate)
+        (where.createdAt as Record<string, unknown>).lte = new Date(
+          filter.endDate,
+        );
     }
 
     const payouts = await this.prisma.payout.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       include: {
-        instructor: { select: { id: true, firstName: true, lastName: true, email: true } },
+        instructor: { select: USER_BRIEF_WITH_EMAIL_SELECT },
       },
     });
 
@@ -1336,13 +1459,16 @@ export class AdminService {
 
   // ==================== CHALLENGE MANAGEMENT ====================
 
-  async createChallenge(createChallengeDto: CreateChallengeDto, adminId: string) {
+  async createChallenge(
+    createChallengeDto: CreateChallengeDto,
+    adminId: string,
+  ) {
     const existingChallenge = await this.prisma.codingChallenge.findUnique({
       where: { slug: createChallengeDto.slug },
     });
 
     if (existingChallenge) {
-      throw new ConflictException('Challenge with this slug already exists');
+      throw new ConflictException("Challenge with this slug already exists");
     }
 
     const challenge = await this.prisma.codingChallenge.create({
@@ -1360,18 +1486,30 @@ export class AdminService {
       },
     });
 
-    await this.createAuditLog(adminId, 'CHALLENGE_CREATED', 'CodingChallenge', challenge.id, {
-      title: challenge.title,
-      slug: challenge.slug,
-    });
+    await this.createAuditLog(
+      adminId,
+      "CHALLENGE_CREATED",
+      "CodingChallenge",
+      challenge.id,
+      {
+        title: challenge.title,
+        slug: challenge.slug,
+      },
+    );
 
     return challenge;
   }
 
-  async updateChallenge(challengeId: string, updateChallengeDto: UpdateChallengeDto, adminId: string) {
-    const challenge = await this.prisma.codingChallenge.findUnique({ where: { id: challengeId } });
+  async updateChallenge(
+    challengeId: string,
+    updateChallengeDto: UpdateChallengeDto,
+    adminId: string,
+  ) {
+    const challenge = await this.prisma.codingChallenge.findUnique({
+      where: { id: challengeId },
+    });
     if (!challenge) {
-      throw new NotFoundException('Challenge not found');
+      throw new NotFoundException("Challenge not found");
     }
 
     const updatedChallenge = await this.prisma.codingChallenge.update({
@@ -1379,17 +1517,25 @@ export class AdminService {
       data: updateChallengeDto,
     });
 
-    await this.createAuditLog(adminId, 'CHALLENGE_UPDATED', 'CodingChallenge', challengeId, {
-      title: challenge.title,
-    });
+    await this.createAuditLog(
+      adminId,
+      "CHALLENGE_UPDATED",
+      "CodingChallenge",
+      challengeId,
+      {
+        title: challenge.title,
+      },
+    );
 
     return updatedChallenge;
   }
 
   async deleteChallenge(challengeId: string, adminId: string) {
-    const challenge = await this.prisma.codingChallenge.findUnique({ where: { id: challengeId, deletedAt: null } });
+    const challenge = await this.prisma.codingChallenge.findUnique({
+      where: { id: challengeId, deletedAt: null },
+    });
     if (!challenge) {
-      throw new NotFoundException('Challenge not found');
+      throw new NotFoundException("Challenge not found");
     }
 
     await this.prisma.codingChallenge.update({
@@ -1397,11 +1543,17 @@ export class AdminService {
       data: { deletedAt: new Date() },
     });
 
-    await this.createAuditLog(adminId, 'CHALLENGE_DELETED', 'CodingChallenge', challengeId, {
-      title: challenge.title,
-    });
+    await this.createAuditLog(
+      adminId,
+      "CHALLENGE_DELETED",
+      "CodingChallenge",
+      challengeId,
+      {
+        title: challenge.title,
+      },
+    );
 
-    return { message: 'Challenge deleted successfully' };
+    return { message: "Challenge deleted successfully" };
   }
 
   async getChallengeById(challengeId: string) {
@@ -1413,7 +1565,7 @@ export class AdminService {
     });
 
     if (!challenge) {
-      throw new NotFoundException('Challenge not found');
+      throw new NotFoundException("Challenge not found");
     }
 
     return challenge;
@@ -1422,53 +1574,53 @@ export class AdminService {
   // ==================== RECYCLE BIN ====================
 
   async getDeletedItems(query: PaginationDto) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
-    const skip = (page - 1) * limit;
+    const { skip, take: limit } = getPaginationMeta(query);
 
-    const [deletedUsers, deletedCourses, deletedChallenges] = await Promise.all([
-      this.prisma.user.findMany({
-        where: { deletedAt: { not: null } },
-        skip,
-        take: limit,
-        orderBy: { deletedAt: 'desc' },
-        select: {
-          id: true,
-          email: true,
-          username: true,
-          firstName: true,
-          lastName: true,
-          roles: true,
-          deletedAt: true,
-        },
-      }),
-      this.prisma.course.findMany({
-        where: { deletedAt: { not: null } },
-        skip,
-        take: limit,
-        orderBy: { deletedAt: 'desc' },
-        select: {
-          id: true,
-          title: true,
-          slug: true,
-          instructorId: true,
-          deletedAt: true,
-        },
-      }),
-      this.prisma.codingChallenge.findMany({
-        where: { deletedAt: { not: null } },
-        skip,
-        take: limit,
-        orderBy: { deletedAt: 'desc' },
-        select: {
-          id: true,
-          title: true,
-          slug: true,
-          difficulty: true,
-          deletedAt: true,
-        },
-      }),
-    ]);
+    const [deletedUsers, deletedCourses, deletedChallenges] = await Promise.all(
+      [
+        this.prisma.user.findMany({
+          where: { deletedAt: { not: null } },
+          skip,
+          take: limit,
+          orderBy: { deletedAt: "desc" },
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+            roles: true,
+            deletedAt: true,
+          },
+        }),
+        this.prisma.course.findMany({
+          where: { deletedAt: { not: null } },
+          skip,
+          take: limit,
+          orderBy: { deletedAt: "desc" },
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            instructorId: true,
+            deletedAt: true,
+          },
+        }),
+        this.prisma.codingChallenge.findMany({
+          where: { deletedAt: { not: null } },
+          skip,
+          take: limit,
+          orderBy: { deletedAt: "desc" },
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            difficulty: true,
+            deletedAt: true,
+          },
+        }),
+      ],
+    );
 
     return {
       users: deletedUsers,
@@ -1480,11 +1632,11 @@ export class AdminService {
   async restoreUser(userId: string, adminId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
     if (!user.deletedAt) {
-      throw new BadRequestException('User is not deleted');
+      throw new BadRequestException("User is not deleted");
     }
 
     await this.prisma.user.update({
@@ -1492,19 +1644,23 @@ export class AdminService {
       data: { deletedAt: null },
     });
 
-    await this.createAuditLog(adminId, 'USER_RESTORED', 'User', userId, { email: user.email });
+    await this.createAuditLog(adminId, "USER_RESTORED", "User", userId, {
+      email: user.email,
+    });
 
-    return { message: 'User restored successfully' };
+    return { message: "User restored successfully" };
   }
 
   async restoreCourse(courseId: string, adminId: string) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId } });
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+    });
     if (!course) {
-      throw new NotFoundException('Course not found');
+      throw new NotFoundException("Course not found");
     }
 
     if (!course.deletedAt) {
-      throw new BadRequestException('Course is not deleted');
+      throw new BadRequestException("Course is not deleted");
     }
 
     await this.prisma.course.update({
@@ -1512,19 +1668,23 @@ export class AdminService {
       data: { deletedAt: null },
     });
 
-    await this.createAuditLog(adminId, 'COURSE_RESTORED', 'Course', courseId, { title: course.title });
+    await this.createAuditLog(adminId, "COURSE_RESTORED", "Course", courseId, {
+      title: course.title,
+    });
 
-    return { message: 'Course restored successfully' };
+    return { message: "Course restored successfully" };
   }
 
   async restoreChallenge(challengeId: string, adminId: string) {
-    const challenge = await this.prisma.codingChallenge.findUnique({ where: { id: challengeId } });
+    const challenge = await this.prisma.codingChallenge.findUnique({
+      where: { id: challengeId },
+    });
     if (!challenge) {
-      throw new NotFoundException('Challenge not found');
+      throw new NotFoundException("Challenge not found");
     }
 
     if (!challenge.deletedAt) {
-      throw new BadRequestException('Challenge is not deleted');
+      throw new BadRequestException("Challenge is not deleted");
     }
 
     await this.prisma.codingChallenge.update({
@@ -1532,28 +1692,33 @@ export class AdminService {
       data: { deletedAt: null },
     });
 
-    await this.createAuditLog(adminId, 'CHALLENGE_RESTORED', 'CodingChallenge', challengeId, {
-      title: challenge.title,
-    });
+    await this.createAuditLog(
+      adminId,
+      "CHALLENGE_RESTORED",
+      "CodingChallenge",
+      challengeId,
+      {
+        title: challenge.title,
+      },
+    );
 
-    return { message: 'Challenge restored successfully' };
+    return { message: "Challenge restored successfully" };
   }
 
   // ==================== AUDIT LOG MANAGEMENT ====================
 
   async getAuditLogsWithFilters(filter: AuditLogFilterDto) {
-    const page = filter.page || 1;
-    const limit = filter.limit || 50;
-    const skip = (page - 1) * limit;
+    const params = { page: filter.page, limit: filter.limit || 50 };
+    const { skip, take } = getPaginationMeta(params);
 
     const where: Record<string, unknown> = {};
 
     if (filter.action) {
-      where.action = { contains: filter.action, mode: 'insensitive' };
+      where.action = { contains: filter.action, mode: "insensitive" };
     }
 
     if (filter.entity) {
-      where.entity = { contains: filter.entity, mode: 'insensitive' };
+      where.entity = { contains: filter.entity, mode: "insensitive" };
     }
 
     if (filter.entityId) {
@@ -1566,44 +1731,50 @@ export class AdminService {
 
     if (filter.startDate || filter.endDate) {
       where.createdAt = {};
-      if (filter.startDate) (where.createdAt as Record<string, unknown>).gte = new Date(filter.startDate);
-      if (filter.endDate) (where.createdAt as Record<string, unknown>).lte = new Date(filter.endDate);
+      if (filter.startDate)
+        (where.createdAt as Record<string, unknown>).gte = new Date(
+          filter.startDate,
+        );
+      if (filter.endDate)
+        (where.createdAt as Record<string, unknown>).lte = new Date(
+          filter.endDate,
+        );
     }
 
     if (filter.search) {
-      where.OR = [
-        { action: { contains: filter.search, mode: 'insensitive' } },
-        { entity: { contains: filter.search, mode: 'insensitive' } },
-      ];
+      where.OR = textSearch(["action", "entity"], filter.search);
     }
 
-    const [logs, total] = await Promise.all([
-      this.prisma.auditLog.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          user: {
-            select: { id: true, email: true, firstName: true, lastName: true },
+    return paginate(
+      () =>
+        this.prisma.auditLog.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { createdAt: "desc" },
+          include: {
+            user: {
+              select: USER_BRIEF_WITH_EMAIL_SELECT,
+            },
           },
-        },
-      }),
-      this.prisma.auditLog.count({ where }),
-    ]);
-
-    return new PaginatedResult(logs, total, page, limit);
+        }),
+      () => this.prisma.auditLog.count({ where }),
+      params,
+    );
   }
 
   // ==================== FEATURE FLAG MANAGEMENT ====================
 
-  async createFeatureFlag(createFeatureFlagDto: CreateFeatureFlagDto, adminId: string) {
+  async createFeatureFlag(
+    createFeatureFlagDto: CreateFeatureFlagDto,
+    adminId: string,
+  ) {
     const existingFlag = await this.prisma.featureFlag.findUnique({
       where: { key: createFeatureFlagDto.key },
     });
 
     if (existingFlag) {
-      throw new ConflictException('Feature flag with this key already exists');
+      throw new ConflictException("Feature flag with this key already exists");
     }
 
     const flag = await this.prisma.featureFlag.create({
@@ -1617,18 +1788,30 @@ export class AdminService {
       },
     });
 
-    await this.createAuditLog(adminId, 'FEATURE_FLAG_CREATED', 'FeatureFlag', flag.id, {
-      key: flag.key,
-      name: flag.name,
-    });
+    await this.createAuditLog(
+      adminId,
+      "FEATURE_FLAG_CREATED",
+      "FeatureFlag",
+      flag.id,
+      {
+        key: flag.key,
+        name: flag.name,
+      },
+    );
 
     return flag;
   }
 
-  async updateFeatureFlag(flagId: string, updateFeatureFlagDto: UpdateFeatureFlagDto, adminId: string) {
-    const flag = await this.prisma.featureFlag.findUnique({ where: { id: flagId } });
+  async updateFeatureFlag(
+    flagId: string,
+    updateFeatureFlagDto: UpdateFeatureFlagDto,
+    adminId: string,
+  ) {
+    const flag = await this.prisma.featureFlag.findUnique({
+      where: { id: flagId },
+    });
     if (!flag) {
-      throw new NotFoundException('Feature flag not found');
+      throw new NotFoundException("Feature flag not found");
     }
 
     const updatedFlag = await this.prisma.featureFlag.update({
@@ -1636,46 +1819,65 @@ export class AdminService {
       data: updateFeatureFlagDto,
     });
 
-    await this.createAuditLog(adminId, 'FEATURE_FLAG_UPDATED', 'FeatureFlag', flagId, {
-      key: flag.key,
-      changes: { ...updateFeatureFlagDto },
-    });
+    await this.createAuditLog(
+      adminId,
+      "FEATURE_FLAG_UPDATED",
+      "FeatureFlag",
+      flagId,
+      {
+        key: flag.key,
+        changes: { ...updateFeatureFlagDto },
+      },
+    );
 
     return updatedFlag;
   }
 
   async deleteFeatureFlag(flagId: string, adminId: string) {
-    const flag = await this.prisma.featureFlag.findUnique({ where: { id: flagId } });
+    const flag = await this.prisma.featureFlag.findUnique({
+      where: { id: flagId },
+    });
     if (!flag) {
-      throw new NotFoundException('Feature flag not found');
+      throw new NotFoundException("Feature flag not found");
     }
 
     await this.prisma.featureFlag.delete({ where: { id: flagId } });
 
-    await this.createAuditLog(adminId, 'FEATURE_FLAG_DELETED', 'FeatureFlag', flagId, {
-      key: flag.key,
-    });
+    await this.createAuditLog(
+      adminId,
+      "FEATURE_FLAG_DELETED",
+      "FeatureFlag",
+      flagId,
+      {
+        key: flag.key,
+      },
+    );
 
-    return { message: 'Feature flag deleted successfully' };
+    return { message: "Feature flag deleted successfully" };
   }
 
   async getFeatureFlagByKey(key: string) {
     const flag = await this.prisma.featureFlag.findUnique({ where: { key } });
     if (!flag) {
-      throw new NotFoundException('Feature flag not found');
+      throw new NotFoundException("Feature flag not found");
     }
     return flag;
   }
 
   // ==================== PLATFORM SETTINGS MANAGEMENT ====================
 
-  async createPlatformSetting(createPlatformSettingDto: CreatePlatformSettingDto, adminId: string) {
+  async createPlatformSetting(
+    createPlatformSettingDto: CreatePlatformSettingDto,
+    adminId: string,
+  ) {
     const existingSetting = await this.prisma.platformSettings.findUnique({
       where: { key: createPlatformSettingDto.key },
     });
 
     if (existingSetting) {
-      throw new ConflictException('Platform setting with this key already exists');
+      throw new ConflictException(
+        "Platform setting with this key already exists",
+      );
     }
 
     const setting = await this.prisma.platformSettings.create({
@@ -1687,18 +1889,30 @@ export class AdminService {
       },
     });
 
-    await this.createAuditLog(adminId, 'PLATFORM_SETTING_CREATED', 'PlatformSettings', setting.id, {
-      key: setting.key,
-      category: setting.category,
-    });
+    await this.createAuditLog(
+      adminId,
+      "PLATFORM_SETTING_CREATED",
+      "PlatformSettings",
+      setting.id,
+      {
+        key: setting.key,
+        category: setting.category,
+      },
+    );
 
     return setting;
   }
 
-  async updatePlatformSetting(settingId: string, updatePlatformSettingDto: UpdatePlatformSettingDto, adminId: string) {
-    const setting = await this.prisma.platformSettings.findUnique({ where: { id: settingId } });
+  async updatePlatformSetting(
+    settingId: string,
+    updatePlatformSettingDto: UpdatePlatformSettingDto,
+    adminId: string,
+  ) {
+    const setting = await this.prisma.platformSettings.findUnique({
+      where: { id: settingId },
+    });
     if (!setting) {
-      throw new NotFoundException('Platform setting not found');
+      throw new NotFoundException("Platform setting not found");
     }
 
     const updatedSetting = await this.prisma.platformSettings.update({
@@ -1706,56 +1920,71 @@ export class AdminService {
       data: updatePlatformSettingDto,
     });
 
-    await this.createAuditLog(adminId, 'PLATFORM_SETTING_UPDATED', 'PlatformSettings', settingId, {
-      key: setting.key,
-      changes: { ...updatePlatformSettingDto },
-    });
+    await this.createAuditLog(
+      adminId,
+      "PLATFORM_SETTING_UPDATED",
+      "PlatformSettings",
+      settingId,
+      {
+        key: setting.key,
+        changes: { ...updatePlatformSettingDto },
+      },
+    );
 
     return updatedSetting;
   }
 
   async deletePlatformSetting(settingId: string, adminId: string) {
-    const setting = await this.prisma.platformSettings.findUnique({ where: { id: settingId } });
+    const setting = await this.prisma.platformSettings.findUnique({
+      where: { id: settingId },
+    });
     if (!setting) {
-      throw new NotFoundException('Platform setting not found');
+      throw new NotFoundException("Platform setting not found");
     }
 
     await this.prisma.platformSettings.delete({ where: { id: settingId } });
 
-    await this.createAuditLog(adminId, 'PLATFORM_SETTING_DELETED', 'PlatformSettings', settingId, {
-      key: setting.key,
-    });
+    await this.createAuditLog(
+      adminId,
+      "PLATFORM_SETTING_DELETED",
+      "PlatformSettings",
+      settingId,
+      {
+        key: setting.key,
+      },
+    );
 
-    return { message: 'Platform setting deleted successfully' };
+    return { message: "Platform setting deleted successfully" };
   }
 
   async getPlatformSettings(category?: string, query?: PaginationDto) {
-    const page = query?.page || 1;
-    const limit = query?.limit || 50;
-    const skip = (page - 1) * limit;
+    const params = { page: query?.page, limit: query?.limit || 50 };
+    const { skip, take } = getPaginationMeta(params);
 
     const where: Record<string, unknown> = {};
     if (category) {
       where.category = category;
     }
 
-    const [settings, total] = await Promise.all([
-      this.prisma.platformSettings.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { category: 'asc' },
-      }),
-      this.prisma.platformSettings.count({ where }),
-    ]);
-
-    return new PaginatedResult(settings, total, page, limit);
+    return paginate(
+      () =>
+        this.prisma.platformSettings.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { category: "asc" },
+        }),
+      () => this.prisma.platformSettings.count({ where }),
+      params,
+    );
   }
 
   async getPlatformSettingByKey(key: string) {
-    const setting = await this.prisma.platformSettings.findUnique({ where: { key } });
+    const setting = await this.prisma.platformSettings.findUnique({
+      where: { key },
+    });
     if (!setting) {
-      throw new NotFoundException('Platform setting not found');
+      throw new NotFoundException("Platform setting not found");
     }
     return setting;
   }
@@ -1763,7 +1992,7 @@ export class AdminService {
   async getSettingsByCategory(category: string) {
     const settings = await this.prisma.platformSettings.findMany({
       where: { category },
-      orderBy: { key: 'asc' },
+      orderBy: { key: "asc" },
     });
 
     return settings;

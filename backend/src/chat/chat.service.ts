@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { PrismaService } from '../common/prisma.service';
-import { CreateChatDto, SendMessageDto } from './dto/chat.dto';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from "@nestjs/common";
+import { PrismaService } from "../common/prisma.service";
+import { CreateChatDto, SendMessageDto } from "./dto/chat.dto";
+import { getInstructorCourseIds } from "../common/utils/entity.util";
+import { USER_BRIEF_SELECT } from "../common/utils/prisma-selects.util";
 
 @Injectable()
 export class ChatService {
@@ -17,7 +23,7 @@ export class ChatService {
         },
       },
       include: {
-        members: { include: { user: { select: { id: true, firstName: true, lastName: true, avatar: true } } } },
+        members: { include: { user: { select: USER_BRIEF_SELECT } } },
       },
     });
   }
@@ -26,25 +32,20 @@ export class ChatService {
     return this.prisma.chat.findMany({
       where: { members: { some: { userId } } },
       include: {
-        members: { include: { user: { select: { id: true, firstName: true, lastName: true, avatar: true } } } },
-        messages: { take: 1, orderBy: { createdAt: 'desc' } },
+        members: { include: { user: { select: USER_BRIEF_SELECT } } },
+        messages: { take: 1, orderBy: { createdAt: "desc" } },
       },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { updatedAt: "desc" },
     });
   }
 
   async getInstructorConversations(instructorId: string) {
-    const courses = await this.prisma.course.findMany({
-      where: { instructorId, deletedAt: null },
-      select: { id: true },
-    });
-
-    const courseIds = courses.map((c) => c.id);
+    const courseIds = await getInstructorCourseIds(this.prisma, instructorId);
 
     const enrollments = await this.prisma.enrollment.findMany({
       where: { courseId: { in: courseIds } },
       select: { userId: true },
-      distinct: ['userId'],
+      distinct: ["userId"],
     });
 
     const studentIds = enrollments.map((e) => e.userId);
@@ -62,10 +63,7 @@ export class ChatService {
           include: {
             user: {
               select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                avatar: true,
+                ...USER_BRIEF_SELECT,
                 email: true,
               },
             },
@@ -73,10 +71,10 @@ export class ChatService {
         },
         messages: {
           take: 1,
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
         },
       },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { updatedAt: "desc" },
     });
 
     return chats;
@@ -86,16 +84,16 @@ export class ChatService {
     const member = await this.prisma.chatMember.findUnique({
       where: { chatId_userId: { chatId, userId } },
     });
-    if (!member) throw new ForbiddenException('Not a member');
+    if (!member) throw new ForbiddenException("Not a member");
 
     const skip = (page - 1) * limit;
     return this.prisma.message.findMany({
       where: { chatId, deletedAt: null },
       skip,
       take: limit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       include: {
-        sender: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+        sender: { select: USER_BRIEF_SELECT },
       },
     });
   }
@@ -104,12 +102,12 @@ export class ChatService {
     const member = await this.prisma.chatMember.findUnique({
       where: { chatId_userId: { chatId: dto.chatId, userId } },
     });
-    if (!member) throw new ForbiddenException('Not a member');
+    if (!member) throw new ForbiddenException("Not a member");
 
     const message = await this.prisma.message.create({
       data: { chatId: dto.chatId, senderId: userId, content: dto.content },
       include: {
-        sender: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+        sender: { select: USER_BRIEF_SELECT },
       },
     });
 
@@ -122,9 +120,12 @@ export class ChatService {
   }
 
   async deleteMessage(messageId: string, userId: string) {
-    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
-    if (!message) throw new NotFoundException('Message not found');
-    if (message.senderId !== userId) throw new ForbiddenException('Not your message');
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+    if (!message) throw new NotFoundException("Message not found");
+    if (message.senderId !== userId)
+      throw new ForbiddenException("Not your message");
 
     return this.prisma.message.update({
       where: { id: messageId },
