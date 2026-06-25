@@ -38,16 +38,21 @@ export class RedisService implements OnModuleDestroy {
     }
   }
 
-  async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
-    if (!this.isConnected) return;
+  async set(key: string, value: string, ttlSeconds?: number): Promise<boolean> {
+    if (!this.isConnected) {
+      this.logger.warn(`Redis set skipped (not connected): ${key}`);
+      return false;
+    }
     try {
       if (ttlSeconds) {
         await this.client.set(key, value, 'EX', ttlSeconds);
       } else {
         await this.client.set(key, value);
       }
+      return true;
     } catch (error) {
-      this.logger.warn(`Redis set failed: ${error}`);
+      this.logger.warn(`Redis set failed for key ${key}: ${error}`);
+      return false;
     }
   }
 

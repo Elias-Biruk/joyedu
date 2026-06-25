@@ -51,6 +51,7 @@ export function useAuth() {
         }
       } catch (error) {
         // Session validation failed - clear auth state
+        console.warn('Session validation failed:', error instanceof Error ? error.message : 'Unknown error');
         clearAuth();
         localStorage.removeItem('joyedu-auth');
         sessionStorage.clear();
@@ -118,8 +119,8 @@ export function useAuth() {
   const logout = async () => {
     try {
       await api.post('/auth/logout', undefined, { token: accessToken || undefined });
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn('Logout API call failed:', error instanceof Error ? error.message : 'Unknown error');
     }
     clearAuth();
     localStorage.removeItem('joyedu-auth');

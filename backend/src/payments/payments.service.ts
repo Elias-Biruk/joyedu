@@ -115,9 +115,13 @@ export class PaymentsService {
       const userId = session.metadata?.userId;
       const courseId = session.metadata?.courseId;
 
-      if (userId && courseId) {
-        // Use database transaction for atomicity
-        await this.prisma.$transaction(async (tx) => {
+      if (!userId || !courseId) {
+        this.logger.warn(`Stripe checkout.session.completed missing metadata: userId=${userId}, courseId=${courseId}, sessionId=${session.id}`);
+        return { received: true };
+      }
+
+      // Use database transaction for atomicity
+      await this.prisma.$transaction(async (tx) => {
           // Check if enrollment already exists (idempotency)
           const existingEnrollment = await tx.enrollment.findUnique({
             where: { userId_courseId: { userId, courseId } },
@@ -148,7 +152,6 @@ export class PaymentsService {
             });
           }
         });
-      }
     }
 
     return { received: true };
@@ -255,8 +258,8 @@ export class PaymentsService {
     });
 
     if (!transaction) {
-      this.logger.warn(`Transaction not found for order: ${merch_order_id}`);
-      return { received: true, message: 'Transaction not found' };
+      this.logger.error(`Telebirr webhook: transaction not found for order: ${merch_order_id}`);
+      throw new NotFoundException(`Transaction not found for order: ${merch_order_id}`);
     }
 
     // Idempotency check - if already completed, return success

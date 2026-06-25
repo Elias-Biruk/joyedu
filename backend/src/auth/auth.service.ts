@@ -4,6 +4,8 @@ import {
   ConflictException,
   BadRequestException,
   ForbiddenException,
+  InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -25,6 +27,8 @@ import type { ActiveRole, Role } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
@@ -54,7 +58,11 @@ export class AuthService {
       },
     });
 
-    await this.redis.set(`verify:${verifyToken}`, user.id, 86400);
+    const stored = await this.redis.set(`verify:${verifyToken}`, user.id, 86400);
+    if (!stored) {
+      this.logger.error(`Failed to store email verification token for user ${user.id}`);
+      throw new InternalServerErrorException('Registration succeeded but verification token could not be stored. Please request a new verification email.');
+    }
 
     return {
       user: this.sanitizeUser(user),
@@ -156,7 +164,11 @@ export class AuthService {
 
     if (user) {
       const resetToken = uuidv4();
-      await this.redis.set(`reset:${resetToken}`, user.id, 3600);
+      const stored = await this.redis.set(`reset:${resetToken}`, user.id, 3600);
+      if (!stored) {
+        this.logger.error(`Failed to store password reset token for user ${user.id}`);
+        throw new InternalServerErrorException('Unable to process password reset at this time. Please try again later.');
+      }
     }
 
     return { message: 'If the email exists, a reset link has been sent' };

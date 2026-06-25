@@ -47,12 +47,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { chatId: string; content: string; userId: string },
   ) {
-    const message = await this.chatService.sendMessage(data.userId, {
-      chatId: data.chatId,
-      content: data.content,
-    });
-    this.server.to(`chat:${data.chatId}`).emit('newMessage', message);
-    return message;
+    try {
+      const message = await this.chatService.sendMessage(data.userId, {
+        chatId: data.chatId,
+        content: data.content,
+      });
+      this.server.to(`chat:${data.chatId}`).emit('newMessage', message);
+      return message;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
+      this.logger.error(`Failed to send message in chat ${data.chatId}: ${errorMessage}`);
+      client.emit('messageError', { chatId: data.chatId, error: errorMessage });
+    }
   }
 
   @SubscribeMessage('typing')

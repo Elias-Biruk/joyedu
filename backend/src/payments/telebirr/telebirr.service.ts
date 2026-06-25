@@ -44,6 +44,28 @@ export class TelebirrService {
   private ensureInitialized() {
     if (this.initialized) return;
 
+    const requiredKeys = [
+      'TELEBIRR_BASE_URL',
+      'TELEBIRR_X_APP_KEY',
+      'TELEBIRR_APP_SECRET',
+      'TELEBIRR_MERCHANT_APP_ID',
+      'TELEBIRR_MERCHANT_CODE',
+      'TELEBIRR_PRIVATE_KEY_PATH',
+      'TELEBIRR_PUBLIC_KEY_PATH',
+      'TELEBIRR_NOTIFY_URL',
+      'TELEBIRR_REDIRECT_URL',
+    ] as const;
+
+    const missing = requiredKeys.filter(
+      (key) => !this.configService.get<string>(key),
+    );
+
+    if (missing.length > 0) {
+      throw new Error(
+        `Telebirr configuration incomplete. Missing: ${missing.join(', ')}`,
+      );
+    }
+
     this.config = {
       baseUrl: this.configService.get<string>('TELEBIRR_BASE_URL')!,
       xAppKey: this.configService.get<string>('TELEBIRR_X_APP_KEY')!,

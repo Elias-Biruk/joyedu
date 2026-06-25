@@ -56,7 +56,21 @@ class ApiClient {
       throw new Error(error.message || `HTTP ${statusCode}`);
     }
 
-    return response.json();
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return response.json();
+    }
+
+    const text = await response.text();
+    if (!text) {
+      return {} as T;
+    }
+
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return text as unknown as T;
+    }
   }
 
   get<T>(endpoint: string, options?: FetchOptions) {
