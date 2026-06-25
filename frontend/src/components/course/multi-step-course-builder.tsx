@@ -916,11 +916,36 @@ function PublishStep({ courseId, accessToken, onPublish }: any) {
 }
 
 function LessonBuilderWrapper({ courseId, accessToken }: any) {
+  const queryClient = useQueryClient();
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
+  const [selectedSubtopicId, setSelectedSubtopicId] = useState<string | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newLessonTitle, setNewLessonTitle] = useState('');
+  const [newLessonType, setNewLessonType] = useState('MARKDOWN');
+
   const { data: structure, isLoading } = useQuery<{ topics: any[] }>({
     queryKey: ['course-structure', courseId],
     queryFn: () => api.get(`/course-structure/courses/${courseId}/structure`, { token: accessToken }),
     enabled: !!courseId && !!accessToken,
+  });
+
+  const createLessonMutation = useMutation({
+    mutationFn: (data: { subtopicId: string; title: string; type: string }) =>
+      api.post('/lessons', { ...data, slug: data.title.toLowerCase().replace(/\s+/g, '-') }, { token: accessToken }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['course-structure', courseId] });
+      setShowCreateForm(false);
+      setNewLessonTitle('');
+      setNewLessonType('MARKDOWN');
+    },
+  });
+
+  const deleteLessonMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/lessons/${id}`, { token: accessToken }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['course-structure', courseId] });
+    },
   });
 
   if (isLoading) {
@@ -942,36 +967,140 @@ function LessonBuilderWrapper({ courseId, accessToken }: any) {
     );
   }
 
-  const allLessons: any[] = [];
-  structure?.topics.forEach((topic: any) => {
+  const topics = structure?.topics || [];
+
+  const filteredLessons: any[] = [];
+  topics.forEach((topic: any) => {
+    if (selectedTopicId && topic.id !== selectedTopicId) return;
     topic.subtopics?.forEach((subtopic: any) => {
+      if (selectedSubtopicId && subtopic.id !== selectedSubtopicId) return;
       subtopic.lessons?.forEach((lesson: any) => {
-        allLessons.push({ ...lesson, topicTitle: topic.title, subtopicTitle: subtopic.title });
+        filteredLessons.push({ ...lesson, topicTitle: topic.title, subtopicTitle: subtopic.title, subtopicId: subtopic.id });
       });
     });
   });
 
+  const subtopicsForTopic = selectedTopicId
+    ? topics.find((t: any) => t.id === selectedTopicId)?.subtopics || []
+    : [];
+
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold mb-2">Select a Lesson to Edit</h3>
-        <p className="text-muted-foreground mb-4">Choose a lesson from your course curriculum to edit its content</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold">Lesson Builder</h3>
+          <p className="text-muted-foreground">Create and manage lessons linked to your curriculum</p>
+        </div>
+        <Button onClick={() => setShowCreateForm(true)} disabled={!selectedSubtopicId}>
+          <FileText className="h-4 w-4 mr-2" />
+          Create Lesson
+        </Button>
       </div>
 
-      {allLessons.length === 0 ? (
+      {/* Topic/Subtopic Filters */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Filter by Topic</Label>
+          <Select value={selectedTopicId || 'all'} onValueChange={(v) => { setSelectedTopicId(v === 'all' ? null : v); setSelectedSubtopicId(null); }}>
+            <SelectTrigger>
+              <SelectValue placeholder="All Topics" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Topics</SelectItem>
+              {topics.map((topic: any) => (
+                <SelectItem key={topic.id} value={topic.id}>{topic.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Filter by Subtopic</Label>
+          <Select value={selectedSubtopicId || 'all'} onValueChange={(v) => setSelectedSubtopicId(v === 'all' ? null : v)} disabled={!selectedTopicId}>
+            <SelectTrigger>
+              <SelectValue placeholder="All Subtopics" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Subtopics</SelectItem>
+              {subtopicsForTopic.map((st: any) => (
+                <SelectItem key={st.id} value={st.id}>{st.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Create Lesson Form */}
+      {showCreateForm && selectedSubtopicId && (
+        <Card>
+          <CardContent className="pt-6 space-y-4">
+            <div className="space-y-2">
+              <Label>Lesson Title</Label>
+              <Input
+                value={newLessonTitle}
+                onChange={(e) => setNewLessonTitle(e.target.value)}
+                placeholder="Enter lesson title..."
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newLessonTitle.trim()) {
+                    createLessonMutation.mutate({ subtopicId: selectedSubtopicId, title: newLessonTitle.trim(), type: newLessonType });
+                  }
+                  if (e.key === 'Escape') setShowCreateForm(false);
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Lesson Type</Label>
+              <Select value={newLessonType} onValueChange={setNewLessonType}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="MARKDOWN">Markdown</SelectItem>
+                  <SelectItem value="VIDEO">Video</SelectItem>
+                  <SelectItem value="CODING">Coding</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => createLessonMutation.mutate({ subtopicId: selectedSubtopicId, title: newLessonTitle.trim(), type: newLessonType })}
+                disabled={!newLessonTitle.trim() || createLessonMutation.isPending}
+              >
+                {createLessonMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                Create Lesson
+              </Button>
+              <Button variant="ghost" onClick={() => setShowCreateForm(false)}>Cancel</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!selectedSubtopicId && !showCreateForm && (
+        <p className="text-sm text-muted-foreground italic">Select a topic and subtopic above to create new lessons.</p>
+      )}
+
+      {/* Lessons List */}
+      {filteredLessons.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground mb-4">No lessons yet</p>
-            <p className="text-sm text-muted-foreground">Create lessons in the Course Structure step first</p>
+            <p className="text-muted-foreground mb-4">
+              {selectedSubtopicId ? 'No lessons in this subtopic yet' : 'No lessons yet. Select a subtopic and create your first lesson.'}
+            </p>
+            {selectedSubtopicId && (
+              <Button onClick={() => setShowCreateForm(true)}>
+                <FileText className="h-4 w-4 mr-2" />
+                Create First Lesson
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-2">
-          {allLessons.map((lesson) => (
-            <Card key={lesson.id} className="cursor-pointer hover:border-primary" onClick={() => setSelectedLessonId(lesson.id)}>
+          {filteredLessons.map((lesson) => (
+            <Card key={lesson.id} className="hover:border-primary transition-colors">
               <CardContent className="flex items-center justify-between py-4">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => setSelectedLessonId(lesson.id)}>
                   <FileText className="h-5 w-5 text-muted-foreground" />
                   <div>
                     <p className="font-medium">{lesson.title}</p>
@@ -980,7 +1109,11 @@ function LessonBuilderWrapper({ courseId, accessToken }: any) {
                     </p>
                   </div>
                 </div>
-                <Badge variant="outline">{lesson.type}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{lesson.type}</Badge>
+                  <Button variant="ghost" size="sm" onClick={() => setSelectedLessonId(lesson.id)}>Edit</Button>
+                  <Button variant="ghost" size="sm" className="text-destructive" onClick={() => { if (confirm(`Delete "${lesson.title}"?`)) deleteLessonMutation.mutate(lesson.id); }}>Delete</Button>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -992,6 +1125,9 @@ function LessonBuilderWrapper({ courseId, accessToken }: any) {
 
 function QuizBuilderWrapper({ courseId, accessToken }: any) {
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
+  const [selectedSubtopicId, setSelectedSubtopicId] = useState<string | null>(null);
+
   const { data: structure, isLoading } = useQuery<{ topics: any[] }>({
     queryKey: ['course-structure', courseId],
     queryFn: () => api.get(`/course-structure/courses/${courseId}/structure`, { token: accessToken }),
@@ -1017,34 +1153,78 @@ function QuizBuilderWrapper({ courseId, accessToken }: any) {
     );
   }
 
-  const allLessons: any[] = [];
-  structure?.topics.forEach((topic: any) => {
+  const topics = structure?.topics || [];
+
+  const filteredLessons: any[] = [];
+  topics.forEach((topic: any) => {
+    if (selectedTopicId && topic.id !== selectedTopicId) return;
     topic.subtopics?.forEach((subtopic: any) => {
+      if (selectedSubtopicId && subtopic.id !== selectedSubtopicId) return;
       subtopic.lessons?.forEach((lesson: any) => {
-        allLessons.push({ ...lesson, topicTitle: topic.title, subtopicTitle: subtopic.title });
+        filteredLessons.push({ ...lesson, topicTitle: topic.title, subtopicTitle: subtopic.title });
       });
     });
   });
 
+  const subtopicsForTopic = selectedTopicId
+    ? topics.find((t: any) => t.id === selectedTopicId)?.subtopics || []
+    : [];
+
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold mb-2">Select a Lesson to Manage Quizzes</h3>
-        <p className="text-muted-foreground mb-4">Choose a lesson to add or edit quizzes</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold">Quiz Builder</h3>
+          <p className="text-muted-foreground">Create and manage quizzes linked to lessons in your curriculum</p>
+        </div>
       </div>
 
-      {allLessons.length === 0 ? (
+      {/* Topic/Subtopic Filters */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Filter by Topic</Label>
+          <Select value={selectedTopicId || 'all'} onValueChange={(v) => { setSelectedTopicId(v === 'all' ? null : v); setSelectedSubtopicId(null); }}>
+            <SelectTrigger>
+              <SelectValue placeholder="All Topics" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Topics</SelectItem>
+              {topics.map((topic: any) => (
+                <SelectItem key={topic.id} value={topic.id}>{topic.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Filter by Subtopic</Label>
+          <Select value={selectedSubtopicId || 'all'} onValueChange={(v) => setSelectedSubtopicId(v === 'all' ? null : v)} disabled={!selectedTopicId}>
+            <SelectTrigger>
+              <SelectValue placeholder="All Subtopics" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Subtopics</SelectItem>
+              {subtopicsForTopic.map((st: any) => (
+                <SelectItem key={st.id} value={st.id}>{st.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Lesson selection for quiz context */}
+      {filteredLessons.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <HelpCircle className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground mb-4">No lessons yet</p>
-            <p className="text-sm text-muted-foreground">Create lessons in the Course Structure step first</p>
+            <p className="text-muted-foreground mb-4">No lessons available</p>
+            <p className="text-sm text-muted-foreground">Create lessons in the Course Structure step first, then create quizzes for them here.</p>
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-2">
-          {allLessons.map((lesson) => (
-            <Card key={lesson.id} className="cursor-pointer hover:border-primary" onClick={() => setSelectedLessonId(lesson.id)}>
+          <p className="text-sm text-muted-foreground">Select a lesson to create or manage its quizzes:</p>
+          {filteredLessons.map((lesson) => (
+            <Card key={lesson.id} className="cursor-pointer hover:border-primary transition-colors" onClick={() => setSelectedLessonId(lesson.id)}>
               <CardContent className="flex items-center justify-between py-4">
                 <div className="flex items-center gap-3">
                   <HelpCircle className="h-5 w-5 text-muted-foreground" />
@@ -1055,7 +1235,10 @@ function QuizBuilderWrapper({ courseId, accessToken }: any) {
                     </p>
                   </div>
                 </div>
-                <Badge variant="outline">{lesson.type}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{lesson.type}</Badge>
+                  <Button size="sm">Create Quiz</Button>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -1067,6 +1250,9 @@ function QuizBuilderWrapper({ courseId, accessToken }: any) {
 
 function ExerciseBuilderWrapper({ courseId, accessToken }: any) {
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
+  const [selectedSubtopicId, setSelectedSubtopicId] = useState<string | null>(null);
+
   const { data: structure, isLoading } = useQuery<{ topics: any[] }>({
     queryKey: ['course-structure', courseId],
     queryFn: () => api.get(`/course-structure/courses/${courseId}/structure`, { token: accessToken }),
@@ -1092,34 +1278,78 @@ function ExerciseBuilderWrapper({ courseId, accessToken }: any) {
     );
   }
 
-  const allLessons: any[] = [];
-  structure?.topics.forEach((topic: any) => {
+  const topics = structure?.topics || [];
+
+  const filteredLessons: any[] = [];
+  topics.forEach((topic: any) => {
+    if (selectedTopicId && topic.id !== selectedTopicId) return;
     topic.subtopics?.forEach((subtopic: any) => {
+      if (selectedSubtopicId && subtopic.id !== selectedSubtopicId) return;
       subtopic.lessons?.forEach((lesson: any) => {
-        allLessons.push({ ...lesson, topicTitle: topic.title, subtopicTitle: subtopic.title });
+        filteredLessons.push({ ...lesson, topicTitle: topic.title, subtopicTitle: subtopic.title });
       });
     });
   });
 
+  const subtopicsForTopic = selectedTopicId
+    ? topics.find((t: any) => t.id === selectedTopicId)?.subtopics || []
+    : [];
+
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold mb-2">Select a Lesson to Manage Exercises</h3>
-        <p className="text-muted-foreground mb-4">Choose a lesson to add or edit exercises</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold">Exercise Builder</h3>
+          <p className="text-muted-foreground">Create and manage exercises linked to lessons in your curriculum</p>
+        </div>
       </div>
 
-      {allLessons.length === 0 ? (
+      {/* Topic/Subtopic Filters */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Filter by Topic</Label>
+          <Select value={selectedTopicId || 'all'} onValueChange={(v) => { setSelectedTopicId(v === 'all' ? null : v); setSelectedSubtopicId(null); }}>
+            <SelectTrigger>
+              <SelectValue placeholder="All Topics" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Topics</SelectItem>
+              {topics.map((topic: any) => (
+                <SelectItem key={topic.id} value={topic.id}>{topic.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Filter by Subtopic</Label>
+          <Select value={selectedSubtopicId || 'all'} onValueChange={(v) => setSelectedSubtopicId(v === 'all' ? null : v)} disabled={!selectedTopicId}>
+            <SelectTrigger>
+              <SelectValue placeholder="All Subtopics" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Subtopics</SelectItem>
+              {subtopicsForTopic.map((st: any) => (
+                <SelectItem key={st.id} value={st.id}>{st.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Lesson selection for exercise context */}
+      {filteredLessons.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Dumbbell className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground mb-4">No lessons yet</p>
-            <p className="text-sm text-muted-foreground">Create lessons in the Course Structure step first</p>
+            <p className="text-muted-foreground mb-4">No lessons available</p>
+            <p className="text-sm text-muted-foreground">Create lessons in the Course Structure step first, then create exercises for them here.</p>
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-2">
-          {allLessons.map((lesson) => (
-            <Card key={lesson.id} className="cursor-pointer hover:border-primary" onClick={() => setSelectedLessonId(lesson.id)}>
+          <p className="text-sm text-muted-foreground">Select a lesson to create or manage its exercises:</p>
+          {filteredLessons.map((lesson) => (
+            <Card key={lesson.id} className="cursor-pointer hover:border-primary transition-colors" onClick={() => setSelectedLessonId(lesson.id)}>
               <CardContent className="flex items-center justify-between py-4">
                 <div className="flex items-center gap-3">
                   <Dumbbell className="h-5 w-5 text-muted-foreground" />
@@ -1130,7 +1360,10 @@ function ExerciseBuilderWrapper({ courseId, accessToken }: any) {
                     </p>
                   </div>
                 </div>
-                <Badge variant="outline">{lesson.type}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{lesson.type}</Badge>
+                  <Button size="sm">Create Exercise</Button>
+                </div>
               </CardContent>
             </Card>
           ))}

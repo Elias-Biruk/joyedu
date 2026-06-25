@@ -86,7 +86,7 @@ export function ExerciseBuilder({ lessonId, courseId, accessToken, onSave, onCan
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button onClick={() => setEditingExercise({ id: crypto.randomUUID(), title: '', hints: [], solution: '' } as Exercise)}>
+          <Button onClick={() => setEditingExercise({ id: '', title: '', hints: [], solution: '' } as Exercise)}>
             <PlusCircle className="h-4 w-4 mr-2" />
             Create Exercise
           </Button>
@@ -133,7 +133,7 @@ export function ExerciseBuilder({ lessonId, courseId, accessToken, onSave, onCan
             <CardContent className="flex flex-col items-center justify-center py-12">
               <Dumbbell className="h-12 w-12 text-muted-foreground mb-4" />
               <p className="text-muted-foreground mb-4">No exercises yet for this lesson</p>
-              <Button onClick={() => setEditingExercise({ id: crypto.randomUUID(), title: '', hints: [], solution: '' } as Exercise)}>
+              <Button onClick={() => setEditingExercise({ id: '', title: '', hints: [], solution: '' } as Exercise)}>
                 <PlusCircle className="h-4 w-4 mr-2" />
                 Create First Exercise
               </Button>
@@ -174,7 +174,7 @@ export function ExerciseBuilder({ lessonId, courseId, accessToken, onSave, onCan
           <DialogHeader>
             <DialogTitle>Delete Exercise</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{deleteExercise?.title}"? This action cannot be undone.
+              Are you sure you want to delete &ldquo;{deleteExercise?.title}&rdquo;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 mt-4">

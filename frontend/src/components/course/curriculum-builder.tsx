@@ -74,6 +74,8 @@ export function CurriculumBuilder({ courseId, accessToken }: CurriculumBuilderPr
   const [expandedSubtopics, setExpandedSubtopics] = useState<Set<string>>(new Set());
   const [editingItem, setEditingItem] = useState<{ type: 'topic' | 'subtopic' | 'lesson'; id: string; title: string; description?: string } | null>(null);
   const [deleteItem, setDeleteItem] = useState<{ type: 'topic' | 'subtopic' | 'lesson'; id: string; title: string } | null>(null);
+  const [newTopicTitle, setNewTopicTitle] = useState('');
+  const [showNewTopicInput, setShowNewTopicInput] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -211,11 +213,56 @@ export function CurriculumBuilder({ courseId, accessToken }: CurriculumBuilderPr
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Course Curriculum</h3>
-        <Button onClick={() => createTopic.mutate('New Topic')} disabled={createTopic.isPending}>
+        <Button onClick={() => setShowNewTopicInput(true)} disabled={createTopic.isPending}>
           <PlusCircle className="h-4 w-4 mr-2" />
           Add Topic
         </Button>
       </div>
+
+      {showNewTopicInput && (
+        <div className="flex gap-2 items-center">
+          <Input
+            placeholder="Enter topic title..."
+            value={newTopicTitle}
+            onChange={(e) => setNewTopicTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && newTopicTitle.trim()) {
+                createTopic.mutate(newTopicTitle.trim());
+                setNewTopicTitle('');
+                setShowNewTopicInput(false);
+              }
+              if (e.key === 'Escape') {
+                setNewTopicTitle('');
+                setShowNewTopicInput(false);
+              }
+            }}
+            autoFocus
+          />
+          <Button
+            size="sm"
+            onClick={() => {
+              if (newTopicTitle.trim()) {
+                createTopic.mutate(newTopicTitle.trim());
+                setNewTopicTitle('');
+                setShowNewTopicInput(false);
+              }
+            }}
+            disabled={!newTopicTitle.trim()}
+          >
+            Create
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setNewTopicTitle('');
+              setShowNewTopicInput(false);
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={topics.map((t) => t.id)} strategy={verticalListSortingStrategy}>
@@ -244,12 +291,12 @@ export function CurriculumBuilder({ courseId, accessToken }: CurriculumBuilderPr
         </SortableContext>
       </DndContext>
 
-      {topics.length === 0 && (
+      {topics.length === 0 && !showNewTopicInput && (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Layers className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-muted-foreground mb-4">No topics yet. Start building your curriculum!</p>
-            <Button onClick={() => createTopic.mutate('New Topic')}>
+            <Button onClick={() => setShowNewTopicInput(true)}>
               <PlusCircle className="h-4 w-4 mr-2" />
               Add First Topic
             </Button>
@@ -313,7 +360,7 @@ export function CurriculumBuilder({ courseId, accessToken }: CurriculumBuilderPr
           <DialogHeader>
             <DialogTitle>Delete {deleteItem?.type === 'topic' ? 'Topic' : deleteItem?.type === 'subtopic' ? 'Subtopic' : 'Lesson'}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{deleteItem?.title}"? This action cannot be undone.
+              Are you sure you want to delete &ldquo;{deleteItem?.title}&rdquo;? This action cannot be undone.
               {deleteItem?.type === 'topic' && ' This will also delete all subtopics and lessons within this topic.'}
               {deleteItem?.type === 'subtopic' && ' This will also delete all lessons within this subtopic.'}
             </DialogDescription>

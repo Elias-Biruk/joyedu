@@ -310,7 +310,7 @@ export function QuizBuilder({ lessonId, courseId, accessToken, onSave, onCancel 
           <DialogHeader>
             <DialogTitle>Delete Quiz</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{deleteQuiz?.title}"? This action cannot be undone and will also delete all questions in this quiz.
+              Are you sure you want to delete &ldquo;{deleteQuiz?.title}&rdquo;? This action cannot be undone and will also delete all questions in this quiz.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 mt-4">
@@ -336,7 +336,7 @@ export function QuizBuilder({ lessonId, courseId, accessToken, onSave, onCancel 
           <DialogHeader>
             <DialogTitle>Delete Question</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this question: "{deleteQuestion?.text}"? This action cannot be undone.
+              Are you sure you want to delete this question: &ldquo;{deleteQuestion?.text}&rdquo;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 mt-4">
