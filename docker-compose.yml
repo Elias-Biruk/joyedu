@@ -37,10 +37,10 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/joyedu?schema=public
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: your-super-secret-jwt-key-change-in-production
-      JWT_EXPIRES_IN: 15m
-      JWT_REFRESH_SECRET: your-refresh-secret-key-change-in-production
-      JWT_REFRESH_EXPIRES_IN: 7d
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
       CORS_ORIGIN: http://localhost:3000
       PORT: 4000
       APP_URL: http://localhost:3000

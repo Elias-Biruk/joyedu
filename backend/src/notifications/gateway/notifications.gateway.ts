@@ -8,10 +8,20 @@ import {
   MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, UseGuards } from '@nestjs/common';
+import { WsAuthGuard } from '../../common/guards/ws-auth.guard';
+import { JwtPayload } from '../../common/decorators/current-user.decorator';
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: {
+    origin: process.env.CORS_ORIGIN?.split(',') || [
+      'http://localhost',
+      'http://localhost:3000',
+      'http://127.0.0.1',
+      'http://127.0.0.1:3000',
+    ],
+    credentials: true,
+  },
   namespace: '/notifications',
 })
 export class NotificationsGateway
@@ -31,9 +41,11 @@ export class NotificationsGateway
   }
 
   @SubscribeMessage('join')
-  handleJoin(@ConnectedSocket() client: Socket, @MessageBody() userId: string) {
-    client.join(`user:${userId}`);
-    this.logger.log(`User ${userId} joined notifications room`);
+  @UseGuards(WsAuthGuard)
+  handleJoin(@ConnectedSocket() client: Socket, @MessageBody() _userId: string) {
+    const user = (client as Socket & { user: JwtPayload }).user;
+    client.join(`user:${user.sub}`);
+    this.logger.log(`User ${user.sub} joined notifications room`);
   }
 
   sendNotification(userId: string, notification: Record<string, unknown>) {

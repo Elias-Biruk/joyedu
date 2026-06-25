@@ -8,11 +8,21 @@ import {
   MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, UseGuards } from '@nestjs/common';
 import { ChatService } from '../chat.service';
+import { WsAuthGuard } from '../../common/guards/ws-auth.guard';
+import { JwtPayload } from '../../common/decorators/current-user.decorator';
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: {
+    origin: process.env.CORS_ORIGIN?.split(',') || [
+      'http://localhost',
+      'http://localhost:3000',
+      'http://127.0.0.1',
+      'http://127.0.0.1:3000',
+    ],
+    credentials: true,
+  },
   namespace: '/chat',
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -32,22 +42,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinChat')
+  @UseGuards(WsAuthGuard)
   handleJoinChat(@ConnectedSocket() client: Socket, @MessageBody() chatId: string) {
     client.join(`chat:${chatId}`);
     this.logger.log(`Client ${client.id} joined chat:${chatId}`);
   }
 
   @SubscribeMessage('leaveChat')
+  @UseGuards(WsAuthGuard)
   handleLeaveChat(@ConnectedSocket() client: Socket, @MessageBody() chatId: string) {
     client.leave(`chat:${chatId}`);
   }
 
   @SubscribeMessage('sendMessage')
+  @UseGuards(WsAuthGuard)
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { chatId: string; content: string; userId: string },
+    @MessageBody() data: { chatId: string; content: string },
   ) {
-    const message = await this.chatService.sendMessage(data.userId, {
+    const user = (client as Socket & { user: JwtPayload }).user;
+    const message = await this.chatService.sendMessage(user.sub, {
       chatId: data.chatId,
       content: data.content,
     });
@@ -56,12 +70,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('typing')
+  @UseGuards(WsAuthGuard)
   handleTyping(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { chatId: string; userId: string; isTyping: boolean },
+    @MessageBody() data: { chatId: string; isTyping: boolean },
   ) {
+    const user = (client as Socket & { user: JwtPayload }).user;
     client.to(`chat:${data.chatId}`).emit('userTyping', {
-      userId: data.userId,
+      userId: user.sub,
       isTyping: data.isTyping,
     });
   }
