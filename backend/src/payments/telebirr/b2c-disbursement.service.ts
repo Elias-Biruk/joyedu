@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
-import * as https from 'https';
+import { Injectable, Logger } from "@nestjs/common";
+import { HttpService } from "@nestjs/axios";
+import { ConfigService } from "@nestjs/config";
+import { firstValueFrom } from "rxjs";
+import * as https from "https";
+import * as crypto from "crypto";
 
 export interface B2CDisbursementBizContent {
   appid: string;
@@ -56,41 +57,46 @@ export class B2CDisbursementService {
     amount: string,
     receiveName: string,
     fabricToken: string,
-    remark?: string
+    remark?: string,
   ): Promise<B2CDisbursementResponse> {
     try {
-      const reqObject = this.createRequestObject(phoneNumber, amount, receiveName, remark);
-      
-      const baseUrl = this.configService.get<string>('TELEBIRR_BASE_URL');
+      const reqObject = this.createRequestObject(
+        phoneNumber,
+        amount,
+        receiveName,
+        remark,
+      );
+
+      const baseUrl = this.configService.get<string>("TELEBIRR_BASE_URL");
       const url = `${baseUrl}/payment/v1/merchant/disburse`;
-      
-      this.logger.log(`Initiating B2C disbursement to ${phoneNumber} for amount: ${amount} ETB`);
+
+      this.logger.log(
+        `Initiating B2C disbursement to ${phoneNumber} for amount: ${amount} ETB`,
+      );
 
       const httpsAgent = new https.Agent({
-        rejectUnauthorized: !baseUrl?.includes('developerportal'),
+        rejectUnauthorized: !baseUrl?.includes("developerportal"),
       });
 
       const response = await firstValueFrom(
-        this.httpService.post<B2CDisbursementResponse>(
-          url,
-          reqObject,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'X-APP-Key': this.configService.get<string>('TELEBIRR_X_APP_KEY'),
-              'Authorization': `Bearer ${fabricToken}`,
-            },
-            httpsAgent,
-          }
-        )
+        this.httpService.post<B2CDisbursementResponse>(url, reqObject, {
+          headers: {
+            "Content-Type": "application/json",
+            "X-APP-Key": this.configService.get<string>("TELEBIRR_X_APP_KEY"),
+            Authorization: `Bearer ${fabricToken}`,
+          },
+          httpsAgent,
+        }),
       );
 
-      this.logger.log(`B2C disbursement initiated successfully. Trans ID: ${response.data.biz_content.trans_id}`);
-      
+      this.logger.log(
+        `B2C disbursement initiated successfully. Trans ID: ${response.data.biz_content.trans_id}`,
+      );
+
       return response.data;
     } catch (error) {
-      this.logger.error('Failed to initiate B2C disbursement', error.stack);
-      throw new Error('Failed to initiate B2C disbursement');
+      this.logger.error("Failed to initiate B2C disbursement", error.stack);
+      throw new Error("Failed to initiate B2C disbursement");
     }
   }
 
@@ -98,17 +104,18 @@ export class B2CDisbursementService {
     phoneNumber: string,
     amount: string,
     receiveName: string,
-    remark?: string
+    remark?: string,
   ): B2CDisbursementRequest {
     const biz: B2CDisbursementBizContent = {
-      appid: this.configService.get<string>('TELEBIRR_MERCHANT_APP_ID') || '',
-      merch_code: this.configService.get<string>('TELEBIRR_MERCHANT_CODE') || '',
+      appid: this.configService.get<string>("TELEBIRR_MERCHANT_APP_ID") || "",
+      merch_code:
+        this.configService.get<string>("TELEBIRR_MERCHANT_CODE") || "",
       out_trade_no: this.createMerchantOrderId(),
       receive_name: receiveName,
       receive_account: phoneNumber,
       total_amount: amount,
-      trans_currency: 'ETB',
-      notify_url: this.configService.get<string>('TELEBIRR_NOTIFY_URL') || '',
+      trans_currency: "ETB",
+      notify_url: this.configService.get<string>("TELEBIRR_NOTIFY_URL") || "",
     };
 
     if (remark) {
@@ -118,13 +125,13 @@ export class B2CDisbursementService {
     const req: any = {
       timestamp: this.createTimeStamp(),
       nonce_str: this.createNonceStr(),
-      method: 'payment.disburse',
-      version: '1.0',
+      method: "payment.disburse",
+      version: "1.0",
       biz_content: biz,
     };
 
     req.sign = this.signRequestObject(req);
-    req.sign_type = 'SHA256WithRSA';
+    req.sign_type = "SHA256WithRSA";
 
     return req as B2CDisbursementRequest;
   }
@@ -134,7 +141,7 @@ export class B2CDisbursementService {
   }
 
   private createNonceStr(): string {
-    return require('crypto').randomBytes(16).toString('hex');
+    return crypto.randomBytes(16).toString("hex");
   }
 
   private createMerchantOrderId(): string {
@@ -143,30 +150,33 @@ export class B2CDisbursementService {
 
   private buildQueryString(obj: any): string {
     const sortedKeys = Object.keys(obj).sort();
-    const keyValuePairs = sortedKeys.map(key => {
-      const value = typeof obj[key] === 'object' ? JSON.stringify(obj[key]) : obj[key];
+    const keyValuePairs = sortedKeys.map((key) => {
+      const value =
+        typeof obj[key] === "object" ? JSON.stringify(obj[key]) : obj[key];
       return `${key}=${value}`;
     });
-    return keyValuePairs.join('&');
+    return keyValuePairs.join("&");
   }
 
   private signRequestObject(data: any): string {
     const { sign, sign_type, ...dataToSign } = data;
 
-    let stringToSign = '';
+    let stringToSign = "";
     if (dataToSign.biz_content) {
       const { biz_content, ...rest } = dataToSign;
-      stringToSign = this.buildQueryString(rest) + '&' + this.buildQueryString(biz_content);
+      stringToSign =
+        this.buildQueryString(rest) + "&" + this.buildQueryString(biz_content);
     } else {
       stringToSign = this.buildQueryString(dataToSign);
     }
 
-    const privateKey = this.configService.get<string>('TELEBIRR_PRIVATE_KEY') || '';
-    const signature = require('crypto').sign('sha256', Buffer.from(stringToSign), {
+    const privateKey =
+      this.configService.get<string>("TELEBIRR_PRIVATE_KEY") || "";
+    const signature = crypto.sign("sha256", Buffer.from(stringToSign), {
       key: privateKey,
-      padding: require('crypto').constants.RSA_PKCS1_PADDING,
+      padding: crypto.constants.RSA_PKCS1_PADDING,
     });
 
-    return signature.toString('base64');
+    return signature.toString("base64");
   }
 }

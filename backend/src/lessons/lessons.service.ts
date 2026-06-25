@@ -1,8 +1,12 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { PrismaService } from '../common/prisma.service';
-import { CoursePermissionsService } from '../common/services/course-permissions.service';
-import { CreateLessonDto, UpdateLessonDto } from './dto/lessons.dto';
-import { generateSlug } from '../common/utils/slug.util';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from "@nestjs/common";
+import { PrismaService } from "../common/prisma.service";
+import { CoursePermissionsService } from "../common/services/course-permissions.service";
+import { CreateLessonDto, UpdateLessonDto } from "./dto/lessons.dto";
+import { generateSlug } from "../common/utils/slug.util";
 
 @Injectable()
 export class LessonsService {
@@ -16,11 +20,19 @@ export class LessonsService {
       where: { id: dto.subtopicId },
       include: { topic: { include: { course: true } } },
     });
-    if (!subtopic || subtopic.deletedAt) throw new NotFoundException('Subtopic not found');
-    this.permissions.assert(userId, userRoles, subtopic.topic.course, 'edit_content');
+    if (!subtopic || subtopic.deletedAt)
+      throw new NotFoundException("Subtopic not found");
+    this.permissions.assert(
+      userId,
+      userRoles,
+      subtopic.topic.course,
+      "edit_content",
+    );
 
     const slug = generateSlug(dto.title);
-    const count = await this.prisma.lesson.count({ where: { subtopicId: dto.subtopicId } });
+    const count = await this.prisma.lesson.count({
+      where: { subtopicId: dto.subtopicId },
+    });
 
     return this.prisma.lesson.create({
       data: {
@@ -48,21 +60,25 @@ export class LessonsService {
         exercises: true,
       },
     });
-    if (!lesson) throw new NotFoundException('Lesson not found');
+    if (!lesson) throw new NotFoundException("Lesson not found");
     return lesson;
   }
 
-  async findBySubtopic(subtopicId: string, userId: string, userRoles: string[]) {
+  async findBySubtopic(
+    subtopicId: string,
+    userId: string,
+    userRoles: string[],
+  ) {
     const subtopic = await this.prisma.subtopic.findUnique({
       where: { id: subtopicId },
       include: { topic: { include: { course: true } } },
     });
-    if (!subtopic) throw new NotFoundException('Subtopic not found');
-    this.permissions.assert(userId, userRoles, subtopic.topic.course, 'view_content');
+    if (!subtopic) throw new NotFoundException("Subtopic not found");
+    this.permissions.assert(userId, userRoles, subtopic.topic.course, "read");
 
     return this.prisma.lesson.findMany({
       where: { subtopicId, deletedAt: null },
-      orderBy: { sortOrder: 'asc' },
+      orderBy: { sortOrder: "asc" },
       include: {
         contentBlocks: true,
         exercises: true,
@@ -71,13 +87,25 @@ export class LessonsService {
     });
   }
 
-  async update(id: string, userId: string, userRoles: string[], dto: UpdateLessonDto) {
+  async update(
+    id: string,
+    userId: string,
+    userRoles: string[],
+    dto: UpdateLessonDto,
+  ) {
     const lesson = await this.prisma.lesson.findUnique({
       where: { id },
-      include: { subtopic: { include: { topic: { include: { course: true } } } } },
+      include: {
+        subtopic: { include: { topic: { include: { course: true } } } },
+      },
     });
-    if (!lesson) throw new NotFoundException('Lesson not found');
-    this.permissions.assert(userId, userRoles, lesson.subtopic.topic.course, 'edit_content');
+    if (!lesson) throw new NotFoundException("Lesson not found");
+    this.permissions.assert(
+      userId,
+      userRoles,
+      lesson.subtopic.topic.course,
+      "edit_content",
+    );
 
     return this.prisma.lesson.update({ where: { id }, data: dto });
   }
@@ -85,40 +113,72 @@ export class LessonsService {
   async delete(id: string, userId: string, userRoles: string[]) {
     const lesson = await this.prisma.lesson.findUnique({
       where: { id },
-      include: { subtopic: { include: { topic: { include: { course: true } } } } },
+      include: {
+        subtopic: { include: { topic: { include: { course: true } } } },
+      },
     });
-    if (!lesson) throw new NotFoundException('Lesson not found');
-    this.permissions.assert(userId, userRoles, lesson.subtopic.topic.course, 'edit_content');
+    if (!lesson) throw new NotFoundException("Lesson not found");
+    this.permissions.assert(
+      userId,
+      userRoles,
+      lesson.subtopic.topic.course,
+      "edit_content",
+    );
 
-    await this.prisma.lesson.update({ where: { id }, data: { deletedAt: new Date() } });
-    return { message: 'Lesson deleted' };
+    await this.prisma.lesson.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+    return { message: "Lesson deleted" };
   }
 
-  async reorder(subtopicId: string, userId: string, userRoles: string[], lessonIds: string[]) {
+  async reorder(
+    subtopicId: string,
+    userId: string,
+    userRoles: string[],
+    lessonIds: string[],
+  ) {
     const subtopic = await this.prisma.subtopic.findUnique({
       where: { id: subtopicId },
       include: { topic: { include: { course: true } } },
     });
-    if (!subtopic) throw new NotFoundException('Subtopic not found');
-    this.permissions.assert(userId, userRoles, subtopic.topic.course, 'edit_content');
+    if (!subtopic) throw new NotFoundException("Subtopic not found");
+    this.permissions.assert(
+      userId,
+      userRoles,
+      subtopic.topic.course,
+      "edit_content",
+    );
 
     await Promise.all(
       lessonIds.map((id, index) =>
-        this.prisma.lesson.update({ where: { id }, data: { sortOrder: index } }),
+        this.prisma.lesson.update({
+          where: { id },
+          data: { sortOrder: index },
+        }),
       ),
     );
-    return { message: 'Lessons reordered' };
+    return { message: "Lessons reordered" };
   }
 
   async duplicate(id: string, userId: string, userRoles: string[]) {
     const lesson = await this.prisma.lesson.findUnique({
       where: { id },
-      include: { subtopic: { include: { topic: { include: { course: true } } } } },
+      include: {
+        subtopic: { include: { topic: { include: { course: true } } } },
+      },
     });
-    if (!lesson) throw new NotFoundException('Lesson not found');
-    this.permissions.assert(userId, userRoles, lesson.subtopic.topic.course, 'edit_content');
+    if (!lesson) throw new NotFoundException("Lesson not found");
+    this.permissions.assert(
+      userId,
+      userRoles,
+      lesson.subtopic.topic.course,
+      "edit_content",
+    );
 
-    const count = await this.prisma.lesson.count({ where: { subtopicId: lesson.subtopicId } });
+    const count = await this.prisma.lesson.count({
+      where: { subtopicId: lesson.subtopicId },
+    });
     const newSlug = `${lesson.slug}-copy-${count + 1}`;
 
     const newLesson = await this.prisma.lesson.create({
